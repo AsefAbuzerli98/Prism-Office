@@ -22,8 +22,15 @@ tauri-plugin-single-instance = "2"
 serde.workspace = true
 serde_json.workspace = true
 base64 = "0.22"
-ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "gzip"] }
 thiserror.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+
+# TLS for the AI daemon: the OS stack on Windows/macOS (system trust store,
+# no C toolchain needed), rustls + the platform verifier elsewhere.
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+ureq = { version = "3", default-features = false, features = ["native-tls", "gzip"] }
+
+[target.'cfg(not(any(windows, target_os = "macos")))'.dependencies]
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier", "gzip"] }

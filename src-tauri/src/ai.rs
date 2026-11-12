@@ -258,7 +258,17 @@ pub fn complete(
     let (key, _) = store.key().ok_or(AiError::NoKey)?;
     let cfg = store.config();
     let body = request_body(req, &cfg);
+    #[cfg(any(windows, target_os = "macos"))]
+    let tls = ureq::tls::TlsConfig::builder()
+        .provider(ureq::tls::TlsProvider::NativeTls)
+        .build();
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let tls = ureq::tls::TlsConfig::builder()
+        .provider(ureq::tls::TlsProvider::Rustls)
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build();
     let agent: ureq::Agent = ureq::Agent::config_builder()
+        .tls_config(tls)
         .http_status_as_error(false)
         .proxy(ureq::Proxy::try_from_env())
         .build()
