@@ -194,3 +194,16 @@ describe("accessibility panel and ink", () => {
     expect(ed.el.querySelector(".ink-layer")).toBeNull();
   });
 });
+
+describe("container exit", () => {
+  it("returns to the previous body position after editing a footer", async () => {
+    document.body.innerHTML = "";
+    const { ed } = await setup();
+    type(ed, "Body text");
+    ed.execute("footer");
+    type(ed, "Footer");
+    key(ed, "Escape");
+    expect(ed.container).toBeNull();
+    expect(ed.selection.focus).toEqual({ block: 0, offset: 9 });
+  });
+});

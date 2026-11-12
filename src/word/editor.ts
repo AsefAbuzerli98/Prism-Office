@@ -22,7 +22,8 @@ import {
   applyMarks, blockLength, clampPos, comparePos, deleteRange, insertBlocks, insertInline, insertText, isCollapsed, marksAt,
   ordered, rangeHasMark, sliceBlocks, splitInlines, splitParagraph, stepPos, updateParagraphs, wordBoundary, type Pos, type Selection,
 } from "./ops";
-import { pageOrigin, paint, totalHeight, type Rect } from "./render";
+import { createBackend, PageCache, type Backend, type Tile } from "./compositor";
+import { pageOrigin, paint, paintOverlay, paintPage, totalHeight, type Rect } from "./render";
 import { blocksToRtf, rtfToBlocks } from "./rtf";
 import { renderA11yPanel } from "./a11y-panel";
 
@@ -73,7 +74,18 @@ export class WordEditor implements EngineView {
   private lines: Placed[] = [];
   private readonly scroller: HTMLElement;
   private readonly spacer: HTMLElement;
-  private readonly canvas: HTMLCanvasElement;
+  private canvas: HTMLCanvasElement;
+  private readonly overlayCanvas: HTMLCanvasElement;
+  private backend: Backend | null = null;
+  private readonly pageCache = new PageCache((w, hh) => {
+    if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(w, hh);
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = hh;
+    return c;
+  });
+  /** Bumped whenever page rasters must be redrawn (layout change, image loaded). */
+  private layoutVersion = 0;
   private readonly input: HTMLTextAreaElement;
   private readonly mdPane: HTMLTextAreaElement;
   readonly side: HTMLElement;
@@ -97,6 +109,8 @@ export class WordEditor implements EngineView {
   readonly author: string;
   /** What the side panel shows. */
   sideMode: "comments" | "a11y" = "comments";
+  /** Body selection to restore when leaving a header/footer. */
+  private bodySelection: Selection | null = null;
 
   constructor(
     readonly host: HostBridge,
@@ -106,9 +120,16 @@ export class WordEditor implements EngineView {
     this.author = opts.author ?? "Prism User";
     this.measurer = opts.measurer ?? canvasMeasurer();
     this.canvas = h("canvas", { class: "word-canvas", "aria-hidden": "true" });
+    this.overlayCanvas = h("canvas", { class: "word-canvas word-overlay", "aria-hidden": "true" });
     this.spacer = h("div", { class: "word-spacer" });
     this.input = h("textarea", { class: "word-input", "aria-label": "Document text", autocapitalize: "off", autocomplete: "off", spellcheck: "false" });
-    this.scroller = h("div", { class: "word-scroll", tabindex: "-1" }, this.canvas, this.spacer, this.input);
+    this.scroller = h("div", { class: "word-scroll", tabindex: "-1" }, this.canvas, this.overlayCanvas, this.spacer, this.input);
+    const pref = (globalThis.localStorage?.getItem("prism.compositor") ?? "auto") as "auto" | "webgpu" | "webgl2" | "canvas2d";
+    void createBackend(this.canvas, pref).then((b) => {
+      this.backend = b;
+      this.el.dataset.compositor = b?.kind ?? "none";
+      this.scheduleRender();
+    });
     this.mdPane = h("textarea", { class: "word-md", "aria-label": "Markdown source", spellcheck: "false", hidden: true });
     this.side = h("aside", { class: "word-side", hidden: true });
     this.el = h("div", { class: "word-editor" }, this.scroller, this.mdPane, this.side);
@@ -236,6 +257,7 @@ export class WordEditor implements EngineView {
 
   /** Switch the edited container and place the caret. */
   setContainer(c: ContainerRef | null, pos: Pos = { block: 0, offset: 0 }) {
+    if (!this.container && c) this.bodySelection = this.selection;
     this.container = c;
     this.filterLines();
     this.setSelection(collapsedAt(clampPos(this.blocks, pos)));
@@ -244,8 +266,14 @@ export class WordEditor implements EngineView {
 
   // ---- layout & paint ----------------------------------------------------------
 
+  /** Which compositor backend is active (for diagnostics/tests). */
+  get compositor(): string {
+    return this.backend?.kind ?? "none";
+  }
+
   private relayout() {
     if (!this.doc) return;
+    this.layoutVersion++;
     this.layout = layoutDocument(this.doc, this.measurer, { showMarkup: this.showMarkup });
     this.allLines = this.layout.pages.flatMap((p) => p.lines.map((line) => ({ line, page: p.index })));
     this.filterLines();
@@ -275,7 +303,10 @@ export class WordEditor implements EngineView {
       (d) => {
         if (!d) return void this.images.set(relId, "failed");
         const img = new Image();
-        img.onload = () => this.scheduleRender();
+        img.onload = () => {
+          this.layoutVersion++;
+          this.scheduleRender();
+        };
         img.src = `data:${d.mime};base64,${d.data}`;
         this.images.set(relId, img);
       },
@@ -289,23 +320,81 @@ export class WordEditor implements EngineView {
     const vp = this.viewport();
     if (vp.width === 0 || vp.height === 0) return;
     const dpr = window.devicePixelRatio || 1;
+    const layout = this.layout;
+    const dark = document.documentElement.dataset.appearance === "dark";
+    const caret = isCollapsed(this.selection) && this.caretOn && document.activeElement === this.input ? this.caretRect(this.selection.focus) : null;
+    const opts = { active: this.container, images: (id: string) => this.image(id) };
+    for (const c of [this.canvas, this.overlayCanvas]) {
+      c.style.width = `${vp.width}px`;
+      c.style.height = `${vp.height}px`;
+      c.style.transform = `translate(${vp.scrollLeft}px, ${vp.scrollTop}px)`;
+    }
     const W = Math.round(vp.width * dpr);
     const H = Math.round(vp.height * dpr);
-    if (this.canvas.width !== W || this.canvas.height !== H) {
-      this.canvas.width = W;
-      this.canvas.height = H;
-      this.canvas.style.width = `${vp.width}px`;
-      this.canvas.style.height = `${vp.height}px`;
+    if (this.backend) {
+      if (this.canvas.width !== W || this.canvas.height !== H) this.backend.resize(vp.width, vp.height, dpr);
+      const version = this.layoutVersion * 2 + (this.container?.type === "header" ? 1 : 0);
+      const tiles: Tile[] = [];
+      this.pageCache.trim(layout.pages.length);
+      for (const page of layout.pages) {
+        const o = pageOrigin(layout, page.index, vp.width);
+        if (o.y + layout.height < vp.scrollTop || o.y > vp.scrollTop + vp.height) continue;
+        const source = this.pageCache.get(page.index, version, dpr, layout.width, layout.height, (ctx) => paintPage(ctx, layout, page, opts));
+        tiles.push({ key: `p${page.index}`, version, source, x: o.x - vp.scrollLeft, y: o.y - vp.scrollTop, w: layout.width, h: layout.height });
+      }
+      try {
+        this.backend.draw(tiles, dark ? [0.094, 0.094, 0.106] : [0.933, 0.941, 0.953]);
+      } catch (err) {
+        this.downgradeCompositor(err);
+        return;
+      }
+      if (this.overlayCanvas.width !== W || this.overlayCanvas.height !== H) {
+        this.overlayCanvas.width = W;
+        this.overlayCanvas.height = H;
+      }
+      const octx = this.overlayCanvas.getContext("2d");
+      if (octx) paintOverlay(octx, layout, vp, dpr, this.selectionRects(), caret, this.container);
+    } else {
+      // No compositor yet (or none available): paint everything on the overlay canvas.
+      if (this.overlayCanvas.width !== W || this.overlayCanvas.height !== H) {
+        this.overlayCanvas.width = W;
+        this.overlayCanvas.height = H;
+      }
+      const ctx = this.overlayCanvas.getContext("2d");
+      if (ctx) paint(ctx, layout, vp, dpr, this.selectionRects(), caret, dark, opts);
     }
-    this.canvas.style.transform = `translate(${vp.scrollLeft}px, ${vp.scrollTop}px)`;
-    const ctx = this.canvas.getContext("2d");
-    if (!ctx) return;
-    const caret = isCollapsed(this.selection) && this.caretOn && document.activeElement === this.input ? this.caretRect(this.selection.focus) : null;
-    paint(ctx, this.layout, vp, dpr, this.selectionRects(), caret, document.documentElement.dataset.appearance === "dark", {
-      active: this.container,
-      images: (id) => this.image(id),
-    });
     this.positionInput();
+  }
+
+  /** A backend failed at runtime: fall back to the next one (WebGPU → WebGL2 → Canvas 2D). */
+  private downgradeCompositor(err: unknown) {
+    const order = ["webgpu", "webgl2", "canvas2d"] as const;
+    const failed = this.backend?.kind ?? "canvas2d";
+    const next = order[order.indexOf(failed) + 1];
+    console.warn(`Compositor ${failed} failed, falling back`, err);
+    this.backend?.dispose();
+    this.backend = null;
+    if (!next) return this.scheduleRender();
+    // A canvas keeps the context type it was first given, so swap in a fresh one.
+    const fresh = h("canvas", { class: "word-canvas", "aria-hidden": "true" });
+    this.canvas.replaceWith(fresh);
+    this.canvas = fresh;
+    void createBackend(fresh, next).then((b) => {
+      this.backend = b;
+      this.el.dataset.compositor = b?.kind ?? "none";
+      this.layoutVersion++;
+      this.scheduleRender();
+    });
+  }
+
+  /** Blink/selection-only refresh: re-composites cached pages, repaints only the overlay. */
+  private renderOverlay() {
+    if (!this.backend || !this.layout) return this.render();
+    const vp = this.viewport();
+    const dpr = window.devicePixelRatio || 1;
+    const caret = isCollapsed(this.selection) && this.caretOn && document.activeElement === this.input ? this.caretRect(this.selection.focus) : null;
+    const octx = this.overlayCanvas.getContext("2d");
+    if (octx) paintOverlay(octx, this.layout, vp, dpr, this.selectionRects(), caret, this.container);
   }
 
   private viewport() {
@@ -579,7 +668,9 @@ export class WordEditor implements EngineView {
       });
       return this.setContainer(null, found ?? { block: 0, offset: 0 });
     }
-    this.setContainer(null, { block: 0, offset: 0 });
+    const back = this.bodySelection?.focus ?? { block: 0, offset: 0 };
+    this.bodySelection = null;
+    this.setContainer(null, back);
   }
 
   private moveCell(dir: 1 | -1, vertical: boolean, addRow = false): boolean {
@@ -863,6 +954,7 @@ export class WordEditor implements EngineView {
 
   editHeader(kind: "header" | "footer") {
     if (!this.doc) return;
+    if (!this.container) this.bodySelection = this.selection;
     let index = (this.doc.headers ?? []).findIndex((h) => h.kind === kind && h.which === "default");
     if (index < 0) {
       const headers = [...(this.doc.headers ?? []), { kind, which: "default", relId: "", blocks: [paragraph()] }];
@@ -1458,7 +1550,7 @@ export class WordEditor implements EngineView {
     this.blink = setInterval(() => {
       if (document.activeElement !== this.input) return;
       this.caretOn = !this.caretOn;
-      this.render();
+      this.renderOverlay();
     }, 530);
   }
 

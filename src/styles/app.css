@@ -216,6 +216,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .word-editor.split { grid-template-columns: 1fr minmax(280px, 40%); }
 .word-scroll { position: relative; overflow: auto; outline: none; cursor: text; background: var(--bg); }
 .word-canvas { position: absolute; top: 0; left: 0; pointer-events: none; will-change: transform; }
+.word-overlay { z-index: 1; }
 .word-spacer { pointer-events: none; }
 .word-input {
   position: absolute; top: 0; left: 0; width: 2px; height: 20px; padding: 0; border: 0; margin: 0;
