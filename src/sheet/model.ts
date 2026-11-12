@@ -42,6 +42,16 @@ export interface TableDef {
   totalsRow: boolean;
 }
 
+export type ChartKind = "column" | "bar" | "line" | "area" | "pie" | "scatter";
+
+export interface ChartDef {
+  kind: ChartKind;
+  title: string;
+  data: Rect;
+  anchor: Rect;
+  fromFile?: boolean;
+}
+
 export interface SheetModel {
   name: string;
   cells: CellModel[];
@@ -51,6 +61,7 @@ export interface SheetModel {
   frozen: [number, number];
   hidden: boolean;
   tables: TableDef[];
+  charts?: ChartDef[];
   source?: number;
 }
 

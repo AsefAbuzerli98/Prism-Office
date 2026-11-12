@@ -48,6 +48,7 @@ pub struct Sheet {
     /// Spilled cell → anchor.
     pub spill_owner: HashMap<CellRef, CellRef>,
     pub tables: Vec<TableDef>,
+    pub charts: Vec<crate::model::ChartDef>,
     pub col_widths: BTreeMap<u32, f64>,
     pub row_heights: BTreeMap<u32, f64>,
     pub merges: Vec<Rect>,
@@ -280,7 +281,10 @@ impl Workbook {
             Some(Input::Formula { text, .. }) => format!("={text}"),
             Some(Input::Value(Value::Text(t))) => {
                 // keep text that would otherwise re-parse as a number visibly text
-                if !matches!(parse_literal(t), Value::Text(_)) {
+                if t.starts_with('=')
+                    || t.starts_with('\'')
+                    || !matches!(parse_literal(t), Value::Text(_))
+                {
                     format!("'{t}")
                 } else {
                     t.to_string()

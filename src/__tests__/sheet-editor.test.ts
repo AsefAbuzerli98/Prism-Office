@@ -189,3 +189,37 @@ describe("SheetEditor", () => {
     expect(shown(ed, 0, 0)).toBe("2");
   });
 });
+
+describe("charts, pivots and data import", () => {
+  it("parses CSV/JSON and builds pivot formulas", async () => {
+    const { jsonToRows, parseCsv, pivotFormula, sniffDelimiter } = await import("../sheet/data");
+    expect(sniffDelimiter("a;b;c\n1;2;3")).toBe(";");
+    expect(parseCsv('name,note\r\n"Doe, J","said ""hi""\nthere"\n')).toEqual([["name", "note"], ["Doe, J", 'said "hi"\nthere']]);
+    expect(jsonToRows([{ a: 1 }, { a: 2, b: "x" }])).toEqual([["a", "b"], [1, null], [2, "x"]]);
+    expect(jsonToRows({ data: [[1, 2]] })).toEqual([[1, 2]]);
+    const data = { r0: 0, c0: 0, r1: 4, c1: 2 };
+    expect(pivotFormula({ sheet: "Sales Data", data, rows: 0, cols: 1, values: 2, fn: "SUM", qualify: true })).toBe("=PIVOTBY('Sales Data'!A2:A5,'Sales Data'!B2:B5,'Sales Data'!C2:C5,SUM)");
+    expect(pivotFormula({ sheet: "S", data, rows: 0, cols: null, values: 2, fn: "AVERAGE", qualify: false })).toBe("=GROUPBY(A2:A5,C2:C5,AVERAGE)");
+  });
+
+  it("imports rows safely, inserts charts and refreshes connections", async () => {
+    const { ed } = editor();
+    await ed.ready;
+    const sheet = ed.importRows("sales.csv", [["Region", "Sales"], ["East", "10"], ["West", "=HYPERLINK(\"x\")"], ["North", "30"]], { kind: "csv", source: "/data/sales.csv" });
+    expect(ed.sheet).toBe(sheet);
+    expect(ed.wb!.input(sheet, 2, 1)).toBe("'=HYPERLINK(\"x\")"); // CSV formula injection stays text
+    expect(ed.connections[0]?.sheet).toBe("sales.csv");
+    ed.selectCell(0, 0);
+    const i = ed.insertChart("column", "Sales")!;
+    const charts = ed.wb!.charts(sheet);
+    expect(charts[i]!.chart.anchor.c0).toBe(3);
+    expect(charts[i]!.data.categories).toEqual(["East", "West", "North"]);
+    expect(charts[i]!.data.series[0]).toEqual({ name: "Sales", values: [10, null, 30] });
+    expect(ed.replaceRows("sales.csv", [["Region", "Sales"], ["South", "5"]])).toBe(true);
+    expect(ed.wb!.input(sheet, 2, 0)).toBe("");
+    expect(ed.wb!.charts(sheet)[0]!.data.series[0]!.values[0]).toBe(5);
+    ed.selectedChart = 0;
+    ed.onKey(new KeyboardEvent("keydown", { key: "Delete", cancelable: true }));
+    expect(ed.wb!.charts(sheet)).toEqual([]);
+  });
+});

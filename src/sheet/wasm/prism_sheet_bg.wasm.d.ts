@@ -2,9 +2,11 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_sheetengine_free: (a: number, b: number) => void;
+export const sheetengine_addChart: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const sheetengine_addSheet: (a: number, b: number, c: number) => number;
 export const sheetengine_applyStyle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
 export const sheetengine_asyncRequests: (a: number) => [number, number];
+export const sheetengine_charts: (a: number, b: number) => [number, number];
 export const sheetengine_deleteSheet: (a: number, b: number, c: number) => [number, number, number, number];
 export const sheetengine_edit: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const sheetengine_fill: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
@@ -14,6 +16,7 @@ export const sheetengine_model: (a: number) => [number, number];
 export const sheetengine_new: (a: number, b: number, c: number) => [number, number, number];
 export const sheetengine_paste: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
 export const sheetengine_recalc: (a: number, b: number) => [number, number];
+export const sheetengine_removeChart: (a: number, b: number, c: number) => void;
 export const sheetengine_renameSheet: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
 export const sheetengine_setColWidth: (a: number, b: number, c: number, d: number) => void;
 export const sheetengine_setFrozen: (a: number, b: number, c: number, d: number) => void;
@@ -22,6 +25,7 @@ export const sheetengine_sheets: (a: number) => [number, number];
 export const sheetengine_styleOf: (a: number, b: number, c: number, d: number) => [number, number];
 export const sheetengine_styles: (a: number) => [number, number];
 export const sheetengine_supplyAsync: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
+export const sheetengine_updateChart: (a: number, b: number, c: number, d: number, e: number) => [number, number];
 export const sheetengine_view: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const __wbindgen_externrefs: WebAssembly.Table;
 export const __wbindgen_malloc: (a: number, b: number) => number;

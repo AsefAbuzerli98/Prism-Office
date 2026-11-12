@@ -181,6 +181,41 @@ impl SheetEngine {
         ))
     }
 
+    /// `[{chart, data}]` for a sheet.
+    pub fn charts(&self, sheet: usize) -> String {
+        let v: Vec<_> = self
+            .e
+            .charts(sheet)
+            .into_iter()
+            .map(|(c, d)| serde_json::json!({ "chart": c, "data": d }))
+            .collect();
+        json(&v)
+    }
+
+    #[wasm_bindgen(js_name = addChart)]
+    pub fn add_chart(&mut self, sheet: usize, def_json: &str) -> Result<usize, JsError> {
+        Ok(self
+            .e
+            .add_chart(sheet, serde_json::from_str(def_json).map_err(js)?))
+    }
+
+    #[wasm_bindgen(js_name = updateChart)]
+    pub fn update_chart(
+        &mut self,
+        sheet: usize,
+        index: usize,
+        def_json: &str,
+    ) -> Result<(), JsError> {
+        self.e
+            .update_chart(sheet, index, serde_json::from_str(def_json).map_err(js)?)
+            .map_err(js)
+    }
+
+    #[wasm_bindgen(js_name = removeChart)]
+    pub fn remove_chart(&mut self, sheet: usize, index: usize) {
+        self.e.remove_chart(sheet, index);
+    }
+
     /// Pending `=PY` requests.
     #[wasm_bindgen(js_name = asyncRequests)]
     pub fn async_requests(&self) -> String {

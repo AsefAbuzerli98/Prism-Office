@@ -12,6 +12,21 @@ export class SheetEngine {
         wasm.__wbg_sheetengine_free(ptr, 0);
     }
     /**
+     * @param {number} sheet
+     * @param {string} def_json
+     * @returns {number}
+     */
+    addChart(sheet, def_json) {
+        const val2 = +sheet;
+        const ptr0 = passStringToWasm0(def_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.sheetengine_addChart(this.__wbg_ptr, val2, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
+    }
+    /**
      * @param {string} name
      * @returns {number}
      */
@@ -61,6 +76,23 @@ export class SheetEngine {
         let deferred1_1;
         try {
             const ret = wasm.sheetengine_asyncRequests(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * `[{chart, data}]` for a sheet.
+     * @param {number} sheet
+     * @returns {string}
+     */
+    charts(sheet) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.sheetengine_charts(this.__wbg_ptr, sheet);
             deferred1_0 = ret[0];
             deferred1_1 = ret[1];
             return getStringFromWasm0(ret[0], ret[1]);
@@ -250,6 +282,13 @@ export class SheetEngine {
     }
     /**
      * @param {number} sheet
+     * @param {number} index
+     */
+    removeChart(sheet, index) {
+        wasm.sheetengine_removeChart(this.__wbg_ptr, sheet, index);
+    }
+    /**
+     * @param {number} sheet
      * @param {string} name
      * @param {number} now
      * @returns {string}
@@ -391,6 +430,21 @@ export class SheetEngine {
             return getStringFromWasm0(ptr7, len7);
         } finally {
             wasm.__wbindgen_free(deferred8_0, deferred8_1, 1);
+        }
+    }
+    /**
+     * @param {number} sheet
+     * @param {number} index
+     * @param {string} def_json
+     */
+    updateChart(sheet, index, def_json) {
+        const val2 = +sheet;
+        const val3 = +index;
+        const ptr0 = passStringToWasm0(def_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.sheetengine_updateChart(this.__wbg_ptr, val2, val3, ptr0, len0);
+        if (ret[1]) {
+            throw takeFromExternrefTable0(ret[0]);
         }
     }
     /**

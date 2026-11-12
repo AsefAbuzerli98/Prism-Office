@@ -8,6 +8,7 @@
 pub mod addr;
 pub mod api;
 pub mod calc;
+pub mod chart;
 pub mod eval;
 pub mod functions;
 pub mod model;

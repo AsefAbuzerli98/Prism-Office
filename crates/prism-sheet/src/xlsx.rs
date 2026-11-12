@@ -6,6 +6,9 @@
 //! names, shared strings, dynamic-array metadata, appended number formats);
 //! every other part and worksheet child is copied through byte-for-byte.
 
+// Regexes in loops are compiled once via `re!` or are cheap one-offs per part.
+#![allow(clippy::regex_creation_in_loops)]
+
 use std::collections::{BTreeMap, HashMap};
 
 use prism_openxml::xml::{attrs_of, escape_attr, name_of, ref_text, text_of};
@@ -18,6 +21,14 @@ use crate::model::{CellModel, CellStyle, CellValueModel, SheetModel, WorkbookMod
 use crate::parser::{self, WriteOptions};
 use crate::value::Value;
 use crate::workbook::{DefinedName, Input, TableDef, Workbook};
+
+/// A literal regex compiled once.
+macro_rules! re {
+    ($p:expr) => {{
+        static R: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        R.get_or_init(|| regex::Regex::new($p).expect("static regex"))
+    }};
+}
 
 const S_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const R_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -1078,6 +1089,7 @@ pub fn read_package(pkg: Package) -> Result<(WorkbookModel, XlsxSource)> {
                 }
             }
         }
+        sm.charts = read_charts(&pkg, &part, &sm.name);
         src_sheets.push(SourceSheet {
             part,
             raw,
@@ -1560,6 +1572,89 @@ pub fn write_package(
         {
             set("sheetViews", Some(views_xml(sh.frozen, si == 0)));
         }
+        // charts created in the editor
+        let new_charts: Vec<&crate::model::ChartDef> =
+            sh.charts.iter().filter(|c| !c.from_file).collect();
+        if !new_charts.is_empty() {
+            let mut srels = pkg.relationships(Some(&part)).unwrap_or_default();
+            let existing = children
+                .iter()
+                .find(|(n, _)| n == "drawing")
+                .and_then(|(_, x)| {
+                    regex::Regex::new(r#"r:id="([^"]+)""#)
+                        .unwrap()
+                        .captures(x)
+                        .map(|c| c[1].to_string())
+                });
+            let drawing = match existing
+                .as_ref()
+                .and_then(|id| srels.by_id(id))
+                .and_then(|r| part.resolve(&r.target).ok())
+            {
+                Some(p) => p,
+                None => {
+                    let p = free_part(&pkg, "/xl/drawings/drawing", ".xml");
+                    let id = srels.add(REL_DRAWING, &relative_any(&part, &p), TargetMode::Internal);
+                    children.retain(|(n, _)| n != "drawing");
+                    children.push(("drawing".into(), format!(r#"<drawing r:id="{id}"/>"#)));
+                    pkg.set_part(
+                        p.clone(),
+                        format!("{}</xdr:wsDr>", crate::chart::DRAWING_OPEN).into_bytes(),
+                        Some(CT_DRAWING),
+                    );
+                    p
+                }
+            };
+            pkg.set_relationships(Some(&part), &srels);
+            let mut dxml = part_text(&pkg, &drawing)?;
+            let mut drels = pkg.relationships(Some(&drawing)).unwrap_or_default();
+            for (k, c) in new_charts.iter().enumerate() {
+                let cp = free_part(&pkg, "/xl/charts/chart", ".xml");
+                let data = crate::chart::chart_data(&wb, si, c);
+                pkg.set_part(
+                    cp.clone(),
+                    crate::chart::chart_xml(c, &data, &sm.name).into_bytes(),
+                    Some(CT_CHART),
+                );
+                let rid = drels.add(
+                    REL_CHART,
+                    &relative_any(&drawing, &cp),
+                    TargetMode::Internal,
+                );
+                let anchor = crate::chart::anchor_xml(
+                    1000 + k,
+                    &format!("Chart {}", k + 1),
+                    &c.anchor,
+                    &rid,
+                );
+                // the drawing may use a prefix other than xdr; insert before its closing tag
+                let close = dxml.rfind("</").unwrap_or(dxml.len());
+                let prefix = dxml[close + 2..]
+                    .split(':')
+                    .next()
+                    .filter(|p| !p.contains('>'))
+                    .unwrap_or("xdr")
+                    .to_string();
+                let anchor = if prefix == "xdr" {
+                    anchor
+                } else {
+                    anchor.replace("xdr:", &format!("{prefix}:"))
+                };
+                dxml.insert_str(close, &anchor);
+            }
+            if !dxml.contains("xmlns:a=") {
+                dxml = dxml.replacen(
+                    ":wsDr ",
+                    r#":wsDr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" "#,
+                    1,
+                );
+            }
+            if !dxml.contains("xmlns:r=") {
+                dxml = dxml.replacen(":wsDr ", &format!(r#":wsDr xmlns:r="{R_NS}" "#), 1);
+            }
+            pkg.set_part(drawing.clone(), dxml.into_bytes(), None);
+            pkg.set_relationships(Some(&drawing), &drels);
+        }
         children.sort_by_key(|(n, _)| order_index(SHEET_ORDER, n));
         let head = src_sheet.map(|s| s.raw.head_open()).unwrap_or_else(|| {
             format!(
@@ -1567,6 +1662,11 @@ pub fn write_package(
                 prism_openxml::xml::XML_DECL
             )
         });
+        let head = if head.contains("xmlns:r=") {
+            head
+        } else {
+            head.replacen("<worksheet", &format!(r#"<worksheet xmlns:r="{R_NS}""#), 1)
+        };
         let body: String = children.into_iter().map(|(_, x)| x).collect();
         let xml = format!("{head}{body}</worksheet>");
         pkg.set_part(part.clone(), xml.into_bytes(), Some(CT_SHEET));
@@ -1697,6 +1797,154 @@ impl<T> ChangedCheck<T> for Option<&T> {
             Some(x) => f(x),
         }
     }
+}
+
+const REL_DRAWING: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing";
+const REL_CHART: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart";
+const CT_DRAWING: &str = "application/vnd.openxmlformats-officedocument.drawing+xml";
+const CT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
+
+/// First unused part name `{stem}{n}{ext}`.
+fn free_part(pkg: &Package, stem: &str, ext: &str) -> PartName {
+    (1..)
+        .map(|n| PartName::new(&format!("{stem}{n}{ext}")).expect("static"))
+        .find(|p| !pkg.has_part(p))
+        .unwrap()
+}
+
+/// Relative target from `from`'s directory to `to` (with `../` as needed).
+fn relative_any(from: &PartName, to: &PartName) -> String {
+    let a: Vec<&str> = from
+        .directory()
+        .trim_matches('/')
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .collect();
+    let b: Vec<&str> = to.as_str().trim_start_matches('/').split('/').collect();
+    let common = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let mut parts: Vec<String> = std::iter::repeat("..".to_string())
+        .take(a.len() - common)
+        .collect();
+    parts.extend(b[common..].iter().map(|s| s.to_string()));
+    parts.join("/")
+}
+
+/// Charts in a sheet's drawing (type, title, data range, anchor).
+fn read_charts(
+    pkg: &Package,
+    sheet_part: &PartName,
+    sheet_name: &str,
+) -> Vec<crate::model::ChartDef> {
+    let mut out = Vec::new();
+    let Ok(srels) = pkg.relationships(Some(sheet_part)) else {
+        return out;
+    };
+    for dr in srels.of_type(REL_DRAWING) {
+        let Ok(dp) = sheet_part.resolve(&dr.target) else {
+            continue;
+        };
+        let Ok(dxml) = part_text(pkg, &dp) else {
+            continue;
+        };
+        let drels = pkg.relationships(Some(&dp)).unwrap_or_default();
+        let anchor_re = re!(r"(?s)<(\w+:)?twoCellAnchor.*?</(\w+:)?twoCellAnchor>");
+        let num = |x: &str, tag: &str| {
+            regex::Regex::new(&format!(r"(?s)<(?:\w+:)?{tag}>.*?<(?:\w+:)?col>(\d+)</(?:\w+:)?col>.*?<(?:\w+:)?row>(\d+)</(?:\w+:)?row>")).unwrap().captures(x).map(|c| (c[1].parse::<u32>().unwrap_or(0), c[2].parse::<u32>().unwrap_or(0)))
+        };
+        for m in anchor_re.find_iter(&dxml) {
+            let a = m.as_str();
+            let Some(rid) = regex::Regex::new(r#"chart[^>]*r:id="([^"]+)""#)
+                .unwrap()
+                .captures(a)
+                .map(|c| c[1].to_string())
+            else {
+                continue;
+            };
+            let (Some((c0, r0)), Some((c1, r1))) = (num(a, "from"), num(a, "to")) else {
+                continue;
+            };
+            let Some(cp) = drels.by_id(&rid).and_then(|r| dp.resolve(&r.target).ok()) else {
+                continue;
+            };
+            let Ok(cx) = part_text(pkg, &cp) else {
+                continue;
+            };
+            let kind = [
+                "barChart",
+                "bar3DChart",
+                "lineChart",
+                "line3DChart",
+                "pieChart",
+                "pie3DChart",
+                "doughnutChart",
+                "areaChart",
+                "scatterChart",
+            ]
+            .iter()
+            .find(|k| cx.contains(&format!(":{k}>")) || cx.contains(&format!("<{k}>")))
+            .map(|k| match *k {
+                "barChart" | "bar3DChart" if cx.contains(r#"barDir val="bar""#) => "bar",
+                "barChart" | "bar3DChart" => "column",
+                "lineChart" | "line3DChart" => "line",
+                "areaChart" => "area",
+                "scatterChart" => "scatter",
+                _ => "pie",
+            })
+            .unwrap_or("column");
+            let title = re!(r"(?s)<(?:\w+:)?title>.*?</(?:\w+:)?title>")
+                .find(&cx)
+                .map(|t| {
+                    re!(r"<(?:\w+:)?t>([^<]*)</")
+                        .captures_iter(t.as_str())
+                        .map(|c| unescape(&c[1]))
+                        .collect::<String>()
+                })
+                .unwrap_or_default();
+            // union of the series formulas on this sheet
+            let mut data: Option<Rect> = None;
+            for f in re!(r"<(?:\w+:)?f>([^<]+)</").captures_iter(&cx) {
+                let text = unescape(&f[1]);
+                let (sh, rng) = text.rsplit_once('!').unwrap_or(("", &text));
+                let sh = sh.trim_matches('\'');
+                if !sh.is_empty() && !sh.eq_ignore_ascii_case(sheet_name) {
+                    continue;
+                }
+                if let Some(r) = parse_rect(&rng.replace('$', "")) {
+                    data = Some(match data {
+                        Some(d) => Rect {
+                            r0: d.r0.min(r.r0),
+                            c0: d.c0.min(r.c0),
+                            r1: d.r1.max(r.r1),
+                            c1: d.c1.max(r.c1),
+                        },
+                        None => r,
+                    });
+                }
+            }
+            if let Some(data) = data {
+                out.push(crate::model::ChartDef {
+                    kind: kind.into(),
+                    title,
+                    data,
+                    anchor: Rect {
+                        r0,
+                        c0,
+                        r1: r1.saturating_sub(1).max(r0),
+                        c1: c1.saturating_sub(1).max(c0),
+                    },
+                    from_file: true,
+                });
+            }
+        }
+    }
+    out
+}
+
+fn unescape(s: &str) -> String {
+    quick_xml::escape::unescape(s)
+        .map(|c| c.into_owned())
+        .unwrap_or_else(|_| s.to_string())
 }
 
 fn rel_id_for(rels: &Relationships, from: &PartName, part: &PartName) -> Option<String> {

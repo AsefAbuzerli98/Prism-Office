@@ -92,6 +92,23 @@ impl CellStyle {
     }
 }
 
+/// An embedded chart (DrawingML `c:chartSpace`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChartDef {
+    /// column | bar | line | area | pie | scatter
+    pub kind: String,
+    #[serde(default)]
+    pub title: String,
+    /// Source data: first row = series names, first column = categories.
+    pub data: Rect,
+    /// Cells the chart covers (top-left … bottom-right).
+    pub anchor: Rect,
+    /// Read from the file: its parts are kept as-is on save.
+    #[serde(default, skip_serializing_if = "no")]
+    pub from_file: bool,
+}
+
 fn is_zero(n: &u32) -> bool {
     *n == 0
 }
@@ -128,6 +145,8 @@ pub struct SheetModel {
     pub hidden: bool,
     #[serde(default)]
     pub tables: Vec<TableDef>,
+    #[serde(default)]
+    pub charts: Vec<ChartDef>,
     /// Index of the worksheet in the source file this sheet came from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<usize>,
@@ -184,6 +203,7 @@ impl Workbook {
             s.frozen = sm.frozen;
             s.hidden = sm.hidden;
             s.tables = sm.tables.clone();
+            s.charts = sm.charts.clone();
             s.source = sm.source;
             wb.sheets.push(s);
         }
@@ -255,6 +275,7 @@ impl Workbook {
                     frozen: s.frozen,
                     hidden: s.hidden,
                     tables: s.tables.clone(),
+                    charts: s.charts.clone(),
                     source: s.source,
                 })
                 .collect(),

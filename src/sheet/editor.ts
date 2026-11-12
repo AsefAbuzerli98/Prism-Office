@@ -7,13 +7,23 @@ import { h } from "../core/dom";
 import type { HostBridge } from "../core/host";
 import { MODES } from "../core/modes";
 import type { EngineView } from "../word/editor";
-import { loadEngine, Workbook, type AsyncRequest, type Change, type SheetInfo, type ViewCell } from "./engine";
+import { drawChart } from "./charts";
+import { loadEngine, Workbook, type AsyncRequest, type Change, type ChartData, type SheetInfo, type ViewCell } from "./engine";
 import { a1, Axis, colChars, colName, colPx, DEFAULT_COL_PX, DEFAULT_ROW_PX, MAX_COLS, MAX_ROWS, parseRange, rowPt, rowPx, tokenAt } from "./geometry";
-import type { CellStyle, Rect } from "./model";
+import type { CellStyle, ChartDef, ChartKind, Rect } from "./model";
 
 const HDR_W = 46;
 const HDR_H = 22;
 const ACCENT = MODES.workbook.accent;
+
+export interface DataConnection {
+  kind: "csv" | "json" | "sqlite" | "odbc";
+  /** File path or connection string. */
+  source: string;
+  query?: string;
+  /** Sheet the data lands on. */
+  sheet: string;
+}
 
 export interface SheetEditorOptions {
   onDirty?: () => void;
@@ -70,7 +80,21 @@ export class SheetEditor implements EngineView {
   private acItems: string[] = [];
   private acIndex = 0;
   private editing: { r: number; c: number; source: "cell" | "bar" } | null = null;
-  private drag: null | { kind: "select" | "fill" | "colResize" | "rowResize" | "colSelect" | "rowSelect" | "ref"; index?: number; start?: number; size?: number; refStart?: { r: number; c: number }; refPos?: number } = null;
+  private drag: null | {
+    kind: "select" | "fill" | "colResize" | "rowResize" | "colSelect" | "rowSelect" | "ref" | "chartMove" | "chartResize";
+    index?: number;
+    start?: number;
+    size?: number;
+    refStart?: { r: number; c: number };
+    refPos?: number;
+    origin?: { r: number; c: number };
+    anchor?: Rect;
+  } = null;
+  /** Charts of the current sheet (refreshed on every draw). */
+  private charts: { chart: ChartDef; data: ChartData }[] = [];
+  selectedChart: number | null = null;
+  /** Anchor of the chart being dragged (drawn instead of the stored one). */
+  private chartDrag: { index: number; anchor: Rect } | null = null;
   private fillTarget: Rect | null = null;
   private undoStack: Edit[][] = [];
   private redoStack: Edit[][] = [];
@@ -177,6 +201,7 @@ export class SheetEditor implements EngineView {
     if (!this.wb) return;
     this.info = this.wb.sheets();
     this.styles = this.wb.styles();
+    this.charts = this.wb.charts(Math.min(this.sheet, this.info.length - 1));
     this.sheet = Math.min(this.sheet, this.info.length - 1);
     const s = this.info[this.sheet]!;
     this.cols.set(s.colWidths.map(([c, w]) => [c, colPx(w)]));
@@ -379,6 +404,20 @@ export class SheetEditor implements EngineView {
       this.selectionChanged();
       return;
     }
+    const hit = pointing ? -1 : this.chartAt(x, y);
+    if (hit >= 0) {
+      const ch = this.charts[hit]!.chart;
+      this.selectedChart = hit;
+      const corner = Math.abs(x - this.colX(ch.anchor.c1 + 1)) < 10 && Math.abs(y - this.rowY(ch.anchor.r1 + 1)) < 10;
+      this.drag = { kind: corner ? "chartResize" : "chartMove", index: hit, origin: cell, anchor: { ...ch.anchor } };
+      this.requestDraw();
+      this.opts.onState?.();
+      return;
+    }
+    if (this.selectedChart !== null) {
+      this.selectedChart = null;
+      this.opts.onState?.();
+    }
     if (pointing) {
       const input = this.editing!.source === "cell" ? this.cellEditor : this.formula;
       const pos = input.selectionStart ?? input.value.length;
@@ -460,6 +499,19 @@ export class SheetEditor implements EngineView {
         this.requestDraw();
         break;
       }
+      case "chartMove":
+      case "chartResize": {
+        const dr = cell.r - d.origin!.r;
+        const dc = cell.c - d.origin!.c;
+        const a = d.anchor!;
+        const next: Rect =
+          d.kind === "chartMove"
+            ? { r0: Math.max(0, a.r0 + dr), c0: Math.max(0, a.c0 + dc), r1: Math.max(0, a.r0 + dr) + (a.r1 - a.r0), c1: Math.max(0, a.c0 + dc) + (a.c1 - a.c0) }
+            : { ...a, r1: Math.max(a.r0 + 2, a.r1 + dr), c1: Math.max(a.c0 + 1, a.c1 + dc) };
+        this.chartDrag = { index: d.index!, anchor: next };
+        this.requestDraw();
+        break;
+      }
       case "ref": {
         const input = this.editing?.source === "bar" ? this.formula : this.cellEditor;
         const before = input.value.slice(0, d.refPos!);
@@ -490,6 +542,14 @@ export class SheetEditor implements EngineView {
         this.extent = { r: dst.r1, c: dst.c1 };
         this.selectionChanged();
       } else this.requestDraw();
+    } else if (d.kind === "chartMove" || d.kind === "chartResize") {
+      const ch = this.charts[d.index!]?.chart;
+      const moved = this.chartDrag;
+      this.chartDrag = null;
+      if (ch && moved && JSON.stringify(moved.anchor) !== JSON.stringify(d.anchor)) {
+        this.wb.updateChart(this.sheet, d.index!, { ...ch, anchor: moved.anchor });
+        this.changed({ changed: [], evaluated: 0, circular: [], asyncRequests: 0 });
+      } else this.requestDraw();
     } else if (d.kind === "colResize") {
       this.wb.setColWidth(this.sheet, d.index!, colChars(this.cols.sizeOf(d.index!)));
       this.changed({ changed: [], evaluated: 0, circular: [], asyncRequests: 0 });
@@ -510,6 +570,21 @@ export class SheetEditor implements EngineView {
   /** Keyboard handling while the grid (not an editor) has focus. Public for tests. */
   onKey(e: KeyboardEvent) {
     if (!this.wb || this.editing) return;
+    if (this.selectedChart !== null) {
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        this.wb.removeChart(this.sheet, this.selectedChart);
+        this.selectedChart = null;
+        this.changed({ changed: [], evaluated: 0, circular: [], asyncRequests: 0 });
+        return;
+      }
+      if (e.key === "Escape") {
+        this.selectedChart = null;
+        this.requestDraw();
+        return;
+      }
+      this.selectedChart = null;
+    }
     const mod = e.ctrlKey || e.metaKey;
     const move = (dr: number, dc: number) => {
       e.preventDefault();
@@ -1094,6 +1169,9 @@ export class SheetEditor implements EngineView {
       case "insert":
         this.beginEdit(value ?? "=");
         return true;
+      case "chart":
+        this.insertChart((value as ChartKind) || "column");
+        return true;
       case "clear":
         this.clearSelection();
         return true;
@@ -1144,6 +1222,76 @@ export class SheetEditor implements EngineView {
       }
     }
     return false;
+  }
+
+  // ---- charts, import ----------------------------------------------------------------------------
+
+  private chartAt(x: number, y: number): number {
+    for (let i = this.charts.length - 1; i >= 0; i--) {
+      const a = this.charts[i]!.chart.anchor;
+      if (x >= this.colX(a.c0) && x <= this.colX(a.c1 + 1) && y >= this.rowY(a.r0) && y <= this.rowY(a.r1 + 1)) return i;
+    }
+    return -1;
+  }
+
+  /** Insert a chart of the selected data next to it. */
+  insertChart(kind: ChartKind, title = ""): number | null {
+    if (!this.wb) return null;
+    const s = this.selection;
+    const used = this.info[this.sheet]?.used;
+    let data = { ...s, r1: Math.min(s.r1, used?.r1 ?? s.r1), c1: Math.min(s.c1, used?.c1 ?? s.c1) };
+    if (data.r0 === data.r1 && data.c0 === data.c1 && used) data = used; // single cell: whole table
+    const anchor = { r0: data.r0, c0: data.c1 + 2, r1: data.r0 + 15, c1: data.c1 + 8 };
+    const i = this.wb.addChart(this.sheet, { kind, title, data, anchor });
+    this.selectedChart = i;
+    this.changed({ changed: [], evaluated: 0, circular: [], asyncRequests: 0 });
+    return i;
+  }
+
+  /** Data connections of this session (re-run by Refresh All). */
+  connections: DataConnection[] = [];
+
+  /** Put imported rows on a new sheet. Text that looks like a formula stays text. */
+  importRows(name: string, rows: unknown[][], connection?: Omit<DataConnection, "sheet">): number {
+    if (!this.wb) return -1;
+    const sheet = this.wb.addSheet(name.slice(0, 31).replace(/[\\/?*[\]:]/g, "_") || "Data");
+    if (connection) this.connections.push({ ...connection, sheet: this.wb.sheets()[sheet]!.name });
+    this.writeRows(sheet, rows);
+    return sheet;
+  }
+
+  /** Replace a sheet's contents with rows (Refresh). */
+  replaceRows(sheetName: string, rows: unknown[][]): boolean {
+    if (!this.wb) return false;
+    const sheet = this.wb.sheets().findIndex((s) => s.name === sheetName);
+    if (sheet < 0) return false;
+    const used = this.wb.sheets()[sheet]!.used;
+    if (used) {
+      const clear: Edit[] = [];
+      for (let r = used.r0; r <= used.r1; r++) for (let c = used.c0; c <= used.c1; c++) clear.push({ sheet, r, c, text: "" });
+      this.wb.edit(clear);
+    }
+    this.writeRows(sheet, rows);
+    return true;
+  }
+
+  private writeRows(sheet: number, rows: unknown[][]) {
+    if (!this.wb) return;
+    const edits: Edit[] = [];
+    rows.forEach((row, r) =>
+      row.forEach((v, c) => {
+        if (v === null || v === undefined || v === "") return;
+        let text = typeof v === "string" ? v : typeof v === "object" ? JSON.stringify(v) : String(v);
+        if (/^[=+\-@]/.test(text) && typeof v === "string" && Number.isNaN(Number(text))) text = `'${text}`;
+        edits.push({ sheet, r, c, text });
+      }),
+    );
+    this.sheet = sheet;
+    this.undoStack = [];
+    this.redoStack = [];
+    if (edits.length) this.changed(this.wb.edit(edits));
+    else this.refreshInfo();
+    this.selectCell(0, 0);
   }
 
   // ---- sheet tabs ----------------------------------------------------------------------------------
@@ -1253,6 +1401,27 @@ export class SheetEditor implements EngineView {
         this.drawSelection(ctx);
         ctx.restore();
       }
+    }
+    this.charts = this.wb.charts(this.sheet);
+    if (this.chartDrag && this.charts[this.chartDrag.index]) this.charts[this.chartDrag.index]!.chart.anchor = this.chartDrag.anchor;
+    if (this.charts.length) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(HDR_W, HDR_H, W - HDR_W, H - HDR_H);
+      ctx.clip();
+      this.charts.forEach(({ chart, data }, i) => {
+        const x0 = this.colX(chart.anchor.c0);
+        const y0 = this.rowY(chart.anchor.r0);
+        const x1 = this.colX(chart.anchor.c1 + 1);
+        const y1 = this.rowY(chart.anchor.r1 + 1);
+        if (x1 < HDR_W || y1 < HDR_H || x0 > W || y0 > H) return;
+        drawChart(ctx, x0, y0, x1 - x0, y1 - y0, chart.kind, chart.title, data, this.selectedChart === i);
+        if (this.selectedChart === i) {
+          ctx.fillStyle = ACCENT.base;
+          ctx.fillRect(x1 - 6, y1 - 6, 8, 8);
+        }
+      });
+      ctx.restore();
     }
     this.drawHeaders(ctx, W, H, rowSets, colSets);
     if (fr > 0 || fc > 0) {

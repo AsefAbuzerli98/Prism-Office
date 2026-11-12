@@ -515,6 +515,49 @@ impl Engine {
         }))
     }
 
+    pub fn add_chart(&mut self, sheet: usize, def: crate::model::ChartDef) -> usize {
+        self.wb.sheets[sheet].charts.push(def);
+        self.wb.sheets[sheet].charts.len() - 1
+    }
+
+    pub fn update_chart(
+        &mut self,
+        sheet: usize,
+        index: usize,
+        def: crate::model::ChartDef,
+    ) -> Result<(), String> {
+        let c = self
+            .wb
+            .sheets
+            .get_mut(sheet)
+            .and_then(|s| s.charts.get_mut(index))
+            .ok_or("no such chart")?;
+        *c = def;
+        Ok(())
+    }
+
+    pub fn remove_chart(&mut self, sheet: usize, index: usize) {
+        if let Some(s) = self.wb.sheets.get_mut(sheet) {
+            if index < s.charts.len() {
+                s.charts.remove(index);
+            }
+        }
+    }
+
+    /// Charts of a sheet with their current data.
+    pub fn charts(&self, sheet: usize) -> Vec<(crate::model::ChartDef, crate::chart::ChartData)> {
+        self.wb
+            .sheets
+            .get(sheet)
+            .map(|s| {
+                s.charts
+                    .iter()
+                    .map(|c| (c.clone(), crate::chart::chart_data(&self.wb, sheet, c)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Function names for autocomplete.
     pub fn function_names() -> Vec<&'static str> {
         crate::functions::function_names()

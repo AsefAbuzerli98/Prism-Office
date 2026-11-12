@@ -169,12 +169,96 @@ pub fn run(
     }
 }
 
+const DB_QUERY: &str = include_str!("python/dbquery.py");
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryResult {
+    #[serde(default)]
+    pub columns: Vec<String>,
+    #[serde(default)]
+    pub rows: Vec<Vec<serde_json::Value>>,
+    #[serde(default)]
+    pub truncated: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Read-only SQLite / ODBC query through the Python standard library (sqlite3)
+/// or pyodbc, so no native database driver is linked into the app.
+pub fn query_database(
+    kind: &str,
+    source: &str,
+    query: &str,
+    limit: usize,
+) -> Result<QueryResult, String> {
+    let py = interpreter().ok_or("Python 3 was not found (install it or set PRISM_PYTHON)")?;
+    let mut child = Command::new(py)
+        .args(["-I", "-c", DB_QUERY])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("could not start Python: {e}"))?;
+    let req = serde_json::json!({ "kind": kind, "source": source, "query": query, "limit": limit });
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(req.to_string().as_bytes())
+        .map_err(|e| e.to_string())?;
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    serde_json::from_slice(&out.stdout).map_err(|_| {
+        format!(
+            "query failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+                .lines()
+                .last()
+                .unwrap_or("no output")
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn have_python() -> bool {
         interpreter().is_some()
+    }
+
+    #[test]
+    fn queries_sqlite_read_only() {
+        if !have_python() {
+            return;
+        }
+        let db = std::env::temp_dir().join(format!("prism-q-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&db);
+        let setup = format!("import sqlite3;c=sqlite3.connect(r'{}');c.execute('create table t(a,b)');c.executemany('insert into t values(?,?)',[(1,'x'),(2,'y'),(3,None)]);c.commit()", db.display());
+        assert!(Command::new(interpreter().unwrap())
+            .args(["-c", &setup])
+            .status()
+            .unwrap()
+            .success());
+        let r = query_database(
+            "sqlite",
+            &db.to_string_lossy(),
+            "select a, b from t order by a",
+            2,
+        )
+        .unwrap();
+        assert_eq!(r.columns, ["a", "b"]);
+        assert_eq!(
+            r.rows,
+            vec![
+                vec![serde_json::json!(1), serde_json::json!("x")],
+                vec![serde_json::json!(2), serde_json::json!("y")]
+            ]
+        );
+        assert!(r.truncated);
+        let r = query_database("sqlite", &db.to_string_lossy(), "delete from t", 10).unwrap();
+        assert!(r.error.unwrap().contains("readonly"));
+        let _ = std::fs::remove_file(&db);
     }
 
     #[test]

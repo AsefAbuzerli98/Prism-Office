@@ -306,3 +306,54 @@ fn new_workbook_from_blank_model() {
     );
     std::fs::write(std::env::temp_dir().join("prism-sheet-new.xlsx"), &out).unwrap();
 }
+
+#[test]
+fn charts_are_written_and_read_back() {
+    let (mut m, src) = read_xlsx(&fixture("openpyxl.xlsx")).unwrap();
+    let rect = |r0, c0, r1, c1| prism_sheet::Rect { r0, c0, r1, c1 };
+    m.sheets[0].charts.push(prism_sheet::model::ChartDef {
+        kind: "column".into(),
+        title: "Units & revenue".into(),
+        data: rect(0, 2, 4, 2),
+        anchor: rect(9, 7, 22, 13),
+        from_file: false,
+    });
+    m.sheets[1].charts.push(prism_sheet::model::ChartDef {
+        kind: "pie".into(),
+        title: String::new(),
+        data: rect(0, 0, 0, 1),
+        anchor: rect(2, 0, 12, 5),
+        from_file: false,
+    });
+    let out = write_xlsx(&m, Some(&src), NOW).unwrap();
+    std::fs::write(std::env::temp_dir().join("prism-sheet-charts.xlsx"), &out).unwrap();
+    let pkg = Package::from_bytes(&out).unwrap();
+    let names: Vec<String> = pkg.part_names().map(|p| p.as_str().to_string()).collect();
+    assert!(
+        names.iter().any(|n| n.starts_with("/xl/charts/chart")),
+        "{names:?}"
+    );
+    let chart = String::from_utf8(
+        pkg.part(&PartName::new("/xl/charts/chart1.xml").unwrap())
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(chart.contains("<c:barDir val=\"col\"/>"));
+    assert!(chart.contains("<c:f>Sales!$C$2:$C$5</c:f>"), "{chart}");
+    assert!(chart.contains("Units &amp; revenue"));
+    // the comment's legacy VML drawing is untouched; the chart drawing is separate
+    let (m2, _) = read_xlsx(&out).unwrap();
+    let c = &m2.sheets[0].charts[0];
+    assert_eq!(
+        (c.kind.as_str(), c.title.as_str(), c.from_file),
+        ("column", "Units & revenue", true)
+    );
+    assert_eq!(c.data, rect(0, 2, 4, 2));
+    assert_eq!(c.anchor, rect(9, 7, 22, 13));
+    assert_eq!(m2.sheets[1].charts[0].kind, "pie");
+    // saving again keeps exactly one chart per definition
+    let out2 = write_xlsx(&m2, Some(&read_xlsx(&out).unwrap().1), NOW).unwrap();
+    let (m3, _) = read_xlsx(&out2).unwrap();
+    assert_eq!(m3.sheets[0].charts.len(), 1);
+}

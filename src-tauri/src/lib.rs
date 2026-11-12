@@ -50,6 +50,30 @@ async fn run_python(
 }
 
 #[tauri::command]
+async fn query_database(
+    kind: String,
+    source: String,
+    query: String,
+) -> Result<python::QueryResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        python::query_database(&kind, &source, &query, 200_000)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Text file for data import (CSV/JSON), capped at 64 MB.
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if meta.len() > 64 * 1024 * 1024 {
+        return Err("file is larger than 64 MB".into());
+    }
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+#[tauri::command]
 fn python_status() -> python::PyStatus {
     python::status()
 }
@@ -496,6 +520,8 @@ pub fn run() {
             get_sheet_model,
             run_python,
             python_status,
+            query_database,
+            read_text_file,
             update_sheet_model,
             update_word_document,
             get_word_image,

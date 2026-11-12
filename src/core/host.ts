@@ -93,6 +93,13 @@ export interface PyResult {
   error: string | null;
 }
 
+export interface QueryResult {
+  columns: string[];
+  rows: unknown[][];
+  truncated: boolean;
+  error?: string | null;
+}
+
 export interface PyStatus {
   available: boolean;
   interpreter: string | null;
@@ -141,6 +148,11 @@ export interface HostBridge {
   /** Run one `=PY` cell in the host's Python sandbox. */
   runPython(code: string, inputs: unknown, returnType: number): Promise<PyResult>;
   pythonStatus(): Promise<PyStatus>;
+  /** Choose a CSV/JSON/text file for import. */
+  pickDataFile(): Promise<{ name: string; path: string | null; text: string } | null>;
+  readTextFile(path: string): Promise<string>;
+  /** Read-only SQLite (file path) or ODBC (connection string) query. */
+  queryDatabase(kind: "sqlite" | "odbc", source: string, query: string): Promise<QueryResult>;
   /** Picture bytes (base64) for an image relationship. */
   getWordImage(id: number, relId: string): Promise<{ mime: string; data: string } | null>;
   /** Store a picture in the package; returns its relationship id and EMU size. */
@@ -243,6 +255,19 @@ export class TauriHost implements HostBridge {
   }
   pythonStatus() {
     return this.api.invoke<PyStatus>("python_status");
+  }
+  async pickDataFile() {
+    const r = await this.api.openDialog({ multiple: false, directory: false, filters: [{ name: "Data", extensions: ["csv", "tsv", "txt", "json"] }] });
+    const path = Array.isArray(r) ? (r[0] ?? null) : r;
+    if (!path) return null;
+    const text = await this.readTextFile(path);
+    return { name: path.split(/[\\/]/).pop()!, path, text };
+  }
+  readTextFile(path: string) {
+    return this.api.invoke<string>("read_text_file", { path });
+  }
+  queryDatabase(kind: "sqlite" | "odbc", source: string, query: string) {
+    return this.api.invoke<QueryResult>("query_database", { kind, source, query });
   }
   getSheetModel(id: number) {
     return this.api.invoke<WorkbookModel>("get_sheet_model", { id });
@@ -437,6 +462,18 @@ export class BrowserHost implements HostBridge {
     return { available: false, interpreter: null, version: null, pandas: false };
   }
 
+  pickDataFile() {
+    return pickTextFile(".csv,.tsv,.txt,.json,text/csv,application/json");
+  }
+
+  async readTextFile(path: string): Promise<string> {
+    throw new Error(`Reading ${path} needs the desktop app`);
+  }
+
+  async queryDatabase(): Promise<QueryResult> {
+    return { columns: [], rows: [], truncated: false, error: "Database connections need the desktop app (Python sqlite3 / pyodbc)" };
+  }
+
   async getSheetModel(id: number): Promise<WorkbookModel> {
     const doc = this.docs.get(id);
     if (!doc) throw new Error(`no open document with id ${id}`);
@@ -618,6 +655,23 @@ export function imageInfo(base64: string): { w: number; h: number; mime: string 
 }
 
 /** Open a file chooser for images and read the choice as base64. */
+export function pickTextFile(accept: string): Promise<{ name: string; path: null; text: string } | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept;
+    input.onchange = () => {
+      const f = input.files?.[0];
+      if (!f) return resolve(null);
+      f.text().then(
+        (text) => resolve({ name: f.name, path: null, text }),
+        () => resolve(null),
+      );
+    };
+    input.click();
+  });
+}
+
 export function pickImageFile(): Promise<string | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");

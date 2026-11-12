@@ -4,7 +4,7 @@
  * this file only converts JSON.
  */
 import init, { initSync, SheetEngine } from "./wasm/prism_sheet.js";
-import type { CellStyle, Rect, WorkbookModel } from "./model";
+import type { CellStyle, ChartDef, Rect, WorkbookModel } from "./model";
 
 export interface ViewCell {
   r: number;
@@ -37,6 +37,11 @@ export interface SheetInfo {
   rowHeights: [number, number][];
   merges: Rect[];
   spills: Rect[];
+}
+
+export interface ChartData {
+  categories: string[];
+  series: { name: string; values: (number | null)[] }[];
 }
 
 export interface AsyncRequest {
@@ -152,6 +157,22 @@ export class Workbook {
 
   paste(srcSheet: number, src: Rect, dstSheet: number, r: number, c: number): Change {
     return JSON.parse(this.e.paste(srcSheet, src.r0, src.c0, src.r1, src.c1, dstSheet, r, c, nowSerial())) as Change;
+  }
+
+  charts(sheet: number): { chart: ChartDef; data: ChartData }[] {
+    return JSON.parse(this.e.charts(sheet)) as { chart: ChartDef; data: ChartData }[];
+  }
+
+  addChart(sheet: number, def: ChartDef): number {
+    return this.e.addChart(sheet, JSON.stringify(def));
+  }
+
+  updateChart(sheet: number, index: number, def: ChartDef): void {
+    this.e.updateChart(sheet, index, JSON.stringify(def));
+  }
+
+  removeChart(sheet: number, index: number): void {
+    this.e.removeChart(sheet, index);
   }
 
   asyncRequests(): AsyncRequest[] {

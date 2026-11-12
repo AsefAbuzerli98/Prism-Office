@@ -11,6 +11,9 @@ import { renderEngineView } from "../modes/views";
 import { WordEditor, type EngineView } from "../word/editor";
 import { SheetEditor } from "../sheet/editor";
 import type { AsyncRequest } from "../sheet/engine";
+import { jsonToRows, parseCsv } from "../sheet/data";
+import { openPivotDialog } from "../sheet/pivot-dialog";
+import { openSqlDialog } from "../sheet/connect-dialog";
 import { IMPLEMENTED_PHASE } from "../core/ribbons";
 import { openPicker } from "./picker";
 import { openSourcesDialog } from "./sources-dialog";
@@ -306,7 +309,64 @@ export class Shell {
       insert("xl.regex", "=REGEXEXTRACT("),
       insert("xl.xlookup", "=XLOOKUP("),
       insert("xl.py", '=PY("'),
+      { ...simple("xl.pivotTable", "pivot"), hidden: false, run: () => { const e = ed(); if (e && !openPivotDialog(e)) this.flash(t("sheet.pivotNeedsData", {}, "Select a table with a header row first"), true); } },
+      { ...simple("xl.chart", "chart"), hidden: false, run: () => void ed()?.execute("chart", "column") },
+      { ...simple("xl.importCsv", "import"), hidden: false, run: () => void this.importDataFile() },
+      { ...simple("xl.importSql", "sql"), hidden: false, run: () => void openSqlDialog((req) => void this.importSql(req)) },
+      { ...simple("xl.refresh", "refresh"), hidden: false, keys: ["Mod+Alt+F5"], run: () => void this.refreshConnections() },
+      { ...simple("xl.pyEnv", "pyEnv"), hidden: false, run: () => void this.showPythonStatus() },
     );
+  }
+
+  private async importDataFile() {
+    const ed = this.activeSheet;
+    if (!ed) return;
+    await this.guard(async () => {
+      const file = await this.host.pickDataFile();
+      if (!file) return;
+      const json = /\.json$/i.test(file.name);
+      const rows = json ? jsonToRows(JSON.parse(file.text)) : parseCsv(file.text);
+      const name = file.name.replace(/\.[^.]+$/, "");
+      ed.importRows(name, rows, file.path ? { kind: json ? "json" : "csv", source: file.path } : undefined);
+      this.flash(t("sheet.imported", { n: rows.length }, `Imported ${rows.length} rows`));
+    });
+  }
+
+  private async importSql(req: { kind: "sqlite" | "odbc"; source: string; query: string }) {
+    const ed = this.activeSheet;
+    if (!ed) return;
+    await this.guard(async () => {
+      const res = await this.host.queryDatabase(req.kind, req.source, req.query);
+      if (res.error) throw new Error(res.error);
+      ed.importRows("Query", [res.columns, ...res.rows], { kind: req.kind, source: req.source, query: req.query });
+      this.flash(t("sheet.imported", { n: res.rows.length }, `Imported ${res.rows.length} rows`) + (res.truncated ? " (truncated)" : ""));
+    });
+  }
+
+  private async refreshConnections() {
+    const ed = this.activeSheet;
+    if (!ed) return;
+    if (!ed.connections.length) return this.flash(t("sheet.noConnections", {}, "This workbook has no data connections in this session"));
+    await this.guard(async () => {
+      for (const c of ed.connections) {
+        let rows: unknown[][];
+        if (c.kind === "csv" || c.kind === "json") {
+          const text = await this.host.readTextFile(c.source);
+          rows = c.kind === "json" ? jsonToRows(JSON.parse(text)) : parseCsv(text);
+        } else {
+          const res = await this.host.queryDatabase(c.kind, c.source, c.query ?? "");
+          if (res.error) throw new Error(res.error);
+          rows = [res.columns, ...res.rows];
+        }
+        ed.replaceRows(c.sheet, rows);
+      }
+      this.flash(t("sheet.refreshed", { n: ed.connections.length }, `Refreshed ${ed.connections.length} connection(s)`));
+    });
+  }
+
+  private async showPythonStatus() {
+    const s = await this.host.pythonStatus();
+    this.flash(s.available ? `Python ${s.version ?? ""} (${s.interpreter}) · pandas: ${s.pandas ? "yes" : "no"}` : t("sheet.noPython", {}, "Python 3 was not found — install it or set PRISM_PYTHON"), !s.available);
   }
 
   private registerWordCommands() {
@@ -369,6 +429,10 @@ export class Shell {
       const st = sh.state();
       if (id === "xl.fill" || id === "xl.color")
         return pick(colors.map(([v, l]) => ({ value: v!, label: l!, style: v ? `border-left:14px solid ${v};padding-left:6px` : "" })), id === "xl.fill" ? "fill" : "color", t(`ribbon.cmd.${id}`, {}, id));
+      if (id === "xl.chart") {
+        const kinds: [string, string][] = [["column", "Column"], ["bar", "Bar"], ["line", "Line"], ["area", "Area"], ["pie", "Pie"], ["scatter", "Scatter"]];
+        return pick(kinds.map(([v, l]) => ({ value: v, label: l })), "chart", t("ribbon.cmd.xl.chart", {}, "Chart"));
+      }
       if (id === "xl.numfmt") {
         const formats: [string, string][] = [
           ["General", "General"],
