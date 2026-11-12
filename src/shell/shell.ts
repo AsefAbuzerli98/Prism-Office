@@ -348,7 +348,7 @@ export class Shell {
     if (!ed) return;
     if (!ed.connections.length) {
       ed.execute("refreshPivots");
-      return this.flash(t("sheet.noConnections", {}, "This workbook has no data connections in this session"));
+      return this.flash(t("sheet.noConnections", {}, "This workbook has no data connections"));
     }
     await this.guard(async () => {
       for (const c of ed.connections) {

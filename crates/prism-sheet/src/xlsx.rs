@@ -162,6 +162,9 @@ pub struct XlsxSource {
     sheets: Vec<SourceSheet>,
     xf_count: usize,
     names: Vec<DefinedName>,
+    connections: Vec<crate::model::DataConnection>,
+    /// `<connection>` elements not created by Prism (kept verbatim).
+    foreign_connections: Vec<String>,
 }
 
 // ---- styles ---------------------------------------------------------------------------
@@ -1161,6 +1164,14 @@ pub fn read_package(pkg: Package) -> Result<(WorkbookModel, XlsxSource)> {
     if model.sheets.is_empty() {
         return Err(bad("workbook", "no worksheets"));
     }
+    let (connections, foreign_connections) = match rels
+        .first_of_type(REL_CONNECTIONS)
+        .and_then(|r| wb_part.resolve(&r.target).ok())
+    {
+        Some(p) => read_connections(&part_text(&pkg, &p)?),
+        None => (vec![], vec![]),
+    };
+    model.connections = connections.clone();
     let source = XlsxSource {
         package: pkg,
         workbook_part: wb_part,
@@ -1168,6 +1179,8 @@ pub fn read_package(pkg: Package) -> Result<(WorkbookModel, XlsxSource)> {
         sheets: src_sheets,
         xf_count: num_formats.len(),
         names: model.names.clone(),
+        connections,
+        foreign_connections,
     };
     Ok((model, source))
 }
@@ -1913,6 +1926,35 @@ pub fn write_package(
             );
         }
     }
+    // data connections
+    let src_conns = source.map(|s| s.connections.clone()).unwrap_or_default();
+    let foreign = source
+        .map(|s| s.foreign_connections.clone())
+        .unwrap_or_default();
+    if model.connections != src_conns {
+        let existing = rels
+            .first_of_type(REL_CONNECTIONS)
+            .and_then(|r| wb_part.resolve(&r.target).ok().map(|p| (r.id.clone(), p)));
+        if model.connections.is_empty() && foreign.is_empty() {
+            if let Some((id, p)) = existing {
+                rels.remove(&id);
+                pkg.remove_part(&p);
+            }
+        } else {
+            let p = match existing {
+                Some((_, p)) => p,
+                None => {
+                    rels.add(REL_CONNECTIONS, "connections.xml", TargetMode::Internal);
+                    PartName::new("/xl/connections.xml").expect("static")
+                }
+            };
+            pkg.set_part(
+                p,
+                connections_xml(&model.connections, &foreign).into_bytes(),
+                Some(CT_CONNECTIONS),
+            );
+        }
+    }
     // workbook.xml: regenerate sheets and definedNames
     let mut children = wb_raw.children.clone();
     let sheets_xml = {
@@ -2263,6 +2305,78 @@ fn read_pivots(pkg: &Package, sheet_part: &PartName) -> Vec<crate::model::PivotD
         });
     }
     out
+}
+
+const REL_CONNECTIONS: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/connections";
+const CT_CONNECTIONS: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.connections+xml";
+const PRISM_TAG: &str = "prism:";
+
+/// Prism connections (metadata in `description`) and foreign `<connection>` elements.
+fn read_connections(xml: &str) -> (Vec<crate::model::DataConnection>, Vec<String>) {
+    let mut ours = Vec::new();
+    let mut foreign = Vec::new();
+    for m in re!(r"(?s)<connection\b(?:[^>]*/>|.*?</connection>)").find_iter(xml) {
+        let x = m.as_str();
+        let desc = re!(r#"description="([^"]*)""#)
+            .captures(x.split('>').next().unwrap_or(""))
+            .map(|c| unescape(&c[1]));
+        match desc
+            .as_deref()
+            .and_then(|d| d.strip_prefix(PRISM_TAG))
+            .and_then(|j| serde_json::from_str::<crate::model::DataConnection>(j).ok())
+        {
+            Some(c) => ours.push(c),
+            None => foreign.push(x.to_string()),
+        }
+    }
+    (ours, foreign)
+}
+
+/// `connections.xml`: CSV/JSON as text connections, SQLite/ODBC as ODBC
+/// connections; Prism's own metadata rides in `description`.
+fn connections_xml(conns: &[crate::model::DataConnection], foreign: &[String]) -> String {
+    let max_foreign = foreign
+        .iter()
+        .filter_map(|f| {
+            re!(r#"\bid="(\d+)""#)
+                .captures(f)
+                .and_then(|c| c[1].parse::<u32>().ok())
+        })
+        .max()
+        .unwrap_or(0);
+    let mut x = format!(
+        r#"{}<connections xmlns="{S_NS}">"#,
+        prism_openxml::xml::XML_DECL
+    );
+    for f in foreign {
+        x.push_str(f);
+    }
+    for (i, c) in conns.iter().enumerate() {
+        let id = max_foreign + 1 + i as u32;
+        let meta = escape_attr(&format!(
+            "{PRISM_TAG}{}",
+            serde_json::to_string(c).unwrap_or_default()
+        ));
+        let name = escape_attr(&format!("{} ({})", c.sheet, c.kind));
+        match c.kind.as_str() {
+            "csv" | "json" => x.push_str(&format!(
+                r#"<connection id="{id}" name="{name}" type="6" refreshedVersion="6" background="1" saveData="1" description="{meta}"><textPr codePage="65001" sourceFile="{}" delimited="1" comma="1"/></connection>"#,
+                escape_attr(&c.source)
+            )),
+            _ => {
+                let conn = if c.kind == "sqlite" { format!("Driver={{SQLite3 ODBC Driver}};Database={}", c.source) } else { c.source.clone() };
+                x.push_str(&format!(
+                    r#"<connection id="{id}" name="{name}" type="1" refreshedVersion="6" saveData="1" description="{meta}"><dbPr connection="{}" command="{}"/></connection>"#,
+                    escape_attr(&conn),
+                    escape_attr(c.query.as_deref().unwrap_or(""))
+                ));
+            }
+        }
+    }
+    x.push_str("</connections>");
+    x
 }
 
 fn unescape(s: &str) -> String {

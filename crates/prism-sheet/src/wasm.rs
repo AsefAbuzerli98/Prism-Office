@@ -249,6 +249,16 @@ impl SheetEngine {
         )
     }
 
+    pub fn connections(&self) -> String {
+        json(&self.e.wb.connections)
+    }
+
+    #[wasm_bindgen(js_name = setConnections)]
+    pub fn set_connections(&mut self, json_text: &str) -> Result<(), JsError> {
+        self.e.wb.connections = serde_json::from_str(json_text).map_err(js)?;
+        Ok(())
+    }
+
     /// Pending `=PY` requests.
     #[wasm_bindgen(js_name = asyncRequests)]
     pub fn async_requests(&self) -> String {

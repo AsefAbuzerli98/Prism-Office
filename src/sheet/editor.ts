@@ -21,7 +21,7 @@ export interface DataConnection {
   kind: "csv" | "json" | "sqlite" | "odbc";
   /** File path or connection string. */
   source: string;
-  query?: string;
+  query?: string | null;
   /** Sheet the data lands on. */
   sheet: string;
 }
@@ -1326,14 +1326,16 @@ export class SheetEditor implements EngineView {
     return i;
   }
 
-  /** Data connections of this session (re-run by Refresh All). */
-  connections: DataConnection[] = [];
+  /** Data connections (saved with the workbook; re-run by Refresh All). */
+  get connections(): DataConnection[] {
+    return this.wb?.connections<DataConnection>() ?? [];
+  }
 
   /** Put imported rows on a new sheet. Text that looks like a formula stays text. */
   importRows(name: string, rows: unknown[][], connection?: Omit<DataConnection, "sheet">): number {
     if (!this.wb) return -1;
     const sheet = this.wb.addSheet(name.slice(0, 31).replace(/[\\/?*[\]:]/g, "_") || "Data");
-    if (connection) this.connections.push({ ...connection, sheet: this.wb.sheets()[sheet]!.name });
+    if (connection) this.wb.setConnections([...this.connections, { ...connection, sheet: this.wb.sheets()[sheet]!.name }]);
     this.writeRows(sheet, rows);
     return sheet;
   }

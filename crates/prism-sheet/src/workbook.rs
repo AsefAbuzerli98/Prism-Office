@@ -137,6 +137,7 @@ pub struct Workbook {
     pub(crate) pending: BTreeSet<(usize, CellRef)>,
     /// 1904 date system.
     pub date1904: bool,
+    pub connections: Vec<crate::model::DataConnection>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

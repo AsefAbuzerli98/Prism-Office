@@ -93,6 +93,7 @@ export interface WorkbookModel {
   numFormats: string[];
   styles: CellStyle[];
   date1904: boolean;
+  connections?: { kind: string; source: string; query?: string | null; sheet: string }[];
 }
 
 export function blankWorkbook(): WorkbookModel {

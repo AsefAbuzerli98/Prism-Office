@@ -187,6 +187,14 @@ export class Workbook {
     return JSON.parse(this.e.removePivot(sheet, index, nowSerial())) as Change;
   }
 
+  connections<T>(): T[] {
+    return JSON.parse(this.e.connections()) as T[];
+  }
+
+  setConnections(list: unknown[]): void {
+    this.e.setConnections(JSON.stringify(list));
+  }
+
   pivots(sheet: number): PivotDef[] {
     return JSON.parse(this.e.pivots(sheet)) as PivotDef[];
   }

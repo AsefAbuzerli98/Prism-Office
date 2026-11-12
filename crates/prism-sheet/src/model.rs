@@ -158,6 +158,20 @@ pub struct ChartDef {
     pub part: Option<String>,
 }
 
+/// An external data source whose rows land on a sheet (Refresh All re-reads it).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataConnection {
+    /// csv | json | sqlite | odbc
+    pub kind: String,
+    /// File path or connection string.
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    /// Sheet the data is written to.
+    pub sheet: String,
+}
+
 /// A classic PivotTable: values written into the sheet on refresh, saved to
 /// XLSX with a pivot cache (refreshed by Excel on open).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -245,6 +259,8 @@ pub struct WorkbookModel {
     pub styles: Vec<CellStyle>,
     #[serde(default)]
     pub date1904: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connections: Vec<DataConnection>,
 }
 
 impl WorkbookModel {
@@ -279,6 +295,7 @@ impl Workbook {
             date1904: m.date1904,
             names: m.names.clone(),
             styles: m.styles.clone(),
+            connections: m.connections.clone(),
             ..Default::default()
         };
         for sm in &m.sheets {
@@ -389,6 +406,7 @@ impl Workbook {
             num_formats: self.num_formats.clone(),
             styles: self.styles.clone(),
             date1904: self.date1904,
+            connections: self.connections.clone(),
         }
     }
 }

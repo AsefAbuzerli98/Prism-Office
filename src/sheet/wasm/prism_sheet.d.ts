@@ -19,6 +19,7 @@ export class SheetEngine {
      * `[{chart, data}]` for a sheet.
      */
     charts(sheet: number): string;
+    connections(): string;
     deleteSheet(sheet: number, now: number): string;
     /**
      * `[{sheet,r,c,text}]` → change report.
@@ -46,6 +47,7 @@ export class SheetEngine {
      * Negative width resets to the default.
      */
     setColWidth(sheet: number, col: number, width: number): void;
+    setConnections(json_text: string): void;
     setFrozen(sheet: number, rows: number, cols: number): void;
     setRowHeight(sheet: number, row: number, height: number): void;
     sheets(): string;
@@ -79,6 +81,7 @@ export interface InitOutput {
     readonly sheetengine_applyStyle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly sheetengine_asyncRequests: (a: number) => [number, number];
     readonly sheetengine_charts: (a: number, b: number) => [number, number];
+    readonly sheetengine_connections: (a: number) => [number, number];
     readonly sheetengine_deleteSheet: (a: number, b: number, c: number) => [number, number, number, number];
     readonly sheetengine_edit: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly sheetengine_fill: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
@@ -94,6 +97,7 @@ export interface InitOutput {
     readonly sheetengine_removePivot: (a: number, b: number, c: number, d: number) => [number, number];
     readonly sheetengine_renameSheet: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly sheetengine_setColWidth: (a: number, b: number, c: number, d: number) => void;
+    readonly sheetengine_setConnections: (a: number, b: number, c: number) => [number, number];
     readonly sheetengine_setFrozen: (a: number, b: number, c: number, d: number) => void;
     readonly sheetengine_setRowHeight: (a: number, b: number, c: number, d: number) => void;
     readonly sheetengine_sheets: (a: number) => [number, number];

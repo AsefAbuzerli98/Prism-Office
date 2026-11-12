@@ -259,6 +259,18 @@ impl Engine {
             return Err("a sheet with this name already exists".into());
         }
         let old = std::mem::replace(&mut self.wb.sheets[sheet].name, name.to_string());
+        for c in &mut self.wb.connections {
+            if c.sheet == old {
+                c.sheet = name.to_string();
+            }
+        }
+        for s in &mut self.wb.sheets {
+            for p in &mut s.pivots {
+                if p.source_sheet == old {
+                    p.source_sheet = name.to_string();
+                }
+            }
+        }
         let rewrite = |e: &crate::parser::Expr| crate::parser::rename_sheet(e, &old, name);
         self.rewrite_formulas(rewrite);
         for n in &mut self.wb.names {
@@ -279,6 +291,10 @@ impl Engine {
         }
         let name = self.wb.sheets[sheet].name.clone();
         self.wb.sheets.remove(sheet);
+        self.wb.connections.retain(|c| c.sheet != name);
+        for s in &mut self.wb.sheets {
+            s.pivots.retain(|p| p.source_sheet != name);
+        }
         self.rewrite_formulas(|e| crate::parser::rename_sheet(e, &name, "#REF"));
         self.wb.names.retain(|n| n.sheet != Some(sheet));
         for n in &mut self.wb.names {

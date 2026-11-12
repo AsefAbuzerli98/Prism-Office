@@ -511,3 +511,45 @@ fn file_charts_can_be_edited_and_deleted() {
         1
     );
 }
+
+#[test]
+fn data_connections_are_saved() {
+    use prism_sheet::model::DataConnection;
+    let (mut m, src) = read_xlsx(&fixture("openpyxl.xlsx")).unwrap();
+    m.connections = vec![
+        DataConnection {
+            kind: "csv".into(),
+            source: "/data/sales & co.csv".into(),
+            query: None,
+            sheet: "Sales".into(),
+        },
+        DataConnection {
+            kind: "sqlite".into(),
+            source: "/data/app.db".into(),
+            query: Some("SELECT * FROM t WHERE a < 3".into()),
+            sheet: "Rates".into(),
+        },
+    ];
+    let out = write_xlsx(&m, Some(&src), NOW).unwrap();
+    let pkg = Package::from_bytes(&out).unwrap();
+    let x = String::from_utf8(
+        pkg.part(&PartName::new("/xl/connections.xml").unwrap())
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        x.contains(r#"<textPr codePage="65001" sourceFile="/data/sales &amp; co.csv""#),
+        "{x}"
+    );
+    assert!(x.contains(r#"command="SELECT * FROM t WHERE a &lt; 3""#));
+    let (m2, src2) = read_xlsx(&out).unwrap();
+    assert_eq!(m2.connections, m.connections);
+    let mut m3 = m2.clone();
+    m3.connections.clear();
+    let out3 = write_xlsx(&m3, Some(&src2), NOW).unwrap();
+    assert!(!Package::from_bytes(&out3)
+        .unwrap()
+        .part_names()
+        .any(|p| p.as_str() == "/xl/connections.xml"));
+}
