@@ -13,6 +13,7 @@ import { IMPLEMENTED_PHASE } from "../core/ribbons";
 import { openPicker } from "./picker";
 import { openSourcesDialog } from "./sources-dialog";
 import { openAgentDialog, openAiSettings, openRewriteDialog } from "../word/ai-panel";
+import { openInkOverlay } from "../word/ink";
 import { isCollapsed } from "../word/ops";
 
 const isCollapsedSel = (ed: WordEditor) => isCollapsed(ed.selection);
@@ -282,6 +283,8 @@ export class Shell {
       simple("doc.rejectAll", "rejectAll"),
       simple("doc.nextChange", "nextChange"),
       simple("doc.comments", "comments"),
+      { ...simple("doc.accessibility", "accessibility"), hidden: false },
+      { id: "doc.ink", title: () => t("ribbon.cmd.doc.ink", {}, "Ink"), when: () => !!this.activeEditor?.doc, run: () => { const ed = this.activeEditor; if (ed) openInkOverlay(ed, this.host); } },
       { ...simple("doc.comment", "comment"), when: () => !!this.activeEditor?.doc && !isCollapsedSel(this.activeEditor), keys: ["Mod+Alt+M"] },
     );
   }
@@ -440,7 +443,8 @@ export class Shell {
       case "doc.hyphenation": return st.hyphenation;
       case "doc.rtl": return st.rtl;
       case "doc.header": return st.container === "header";
-      case "doc.comments": return !ed.side.hidden;
+      case "doc.comments": return !ed.side.hidden && ed.sideMode === "comments";
+      case "doc.accessibility": return !ed.side.hidden && ed.sideMode === "a11y";
       default: return false;
     }
   };

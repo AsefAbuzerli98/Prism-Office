@@ -24,6 +24,7 @@ import {
 } from "./ops";
 import { pageOrigin, paint, totalHeight, type Rect } from "./render";
 import { blocksToRtf, rtfToBlocks } from "./rtf";
+import { renderA11yPanel } from "./a11y-panel";
 
 export interface EngineView {
   readonly el: HTMLElement;
@@ -94,9 +95,11 @@ export class WordEditor implements EngineView {
   private resizeObs: ResizeObserver | null = null;
   readonly ready: Promise<void>;
   readonly author: string;
+  /** What the side panel shows. */
+  sideMode: "comments" | "a11y" = "comments";
 
   constructor(
-    private readonly host: HostBridge,
+    readonly host: HostBridge,
     readonly docId: number,
     private readonly opts: EditorOptions = {},
   ) {
@@ -883,6 +886,7 @@ export class WordEditor implements EngineView {
     const initials = this.author.split(/\s+/).map((w) => w[0] ?? "").join("").toUpperCase();
     const comments = [...(doc.comments ?? []), { id, author: this.author, initials, date: new Date().toISOString().replace(/\.\d+Z$/, "Z"), blocks: [paragraph(text)] }];
     this.commitDoc("comment", { ...doc, comments }, { anchor: { block: a.block, offset: a.offset + 1 }, focus: { block: b.block, offset: b.offset + (a.block === b.block ? 1 : 0) } });
+    this.sideMode = "comments";
     this.showSide(true);
     return id;
   }
@@ -1202,7 +1206,10 @@ export class WordEditor implements EngineView {
         if (!this.newComment(arg ?? "")) return false;
         break;
       case "comments":
-        this.showSide(this.side.hidden);
+        this.showPanel("comments");
+        break;
+      case "accessibility":
+        this.showPanel("a11y");
         break;
       case "toc":
         this.insertToc();
@@ -1267,6 +1274,40 @@ export class WordEditor implements EngineView {
 
   // ---- side panel (comments) ----------------------------------------------------------------
 
+  /** Move the caret to a body position. */
+  goTo(pos: Pos) {
+    this.container = null;
+    this.filterLines();
+    this.setSelection({ anchor: pos, focus: { block: pos.block, offset: pos.offset + (this.objectAt(pos) ? 1 : 0) } });
+    this.focus();
+  }
+
+  private objectAt(pos: Pos) {
+    const p = this.doc?.blocks[pos.block];
+    if (!p || !isParagraph(p)) return null;
+    const i = splitInlines(p.inlines, pos.offset)[1][0];
+    return i && (i.type === "image" || i.type === "shape") ? i : null;
+  }
+
+  setImageAlt(pos: Pos, text: string) {
+    this.goTo(pos);
+    this.execute("altText", text);
+  }
+
+  markHeaderRow(tableIndex: number) {
+    const t = this.doc?.blocks[tableIndex];
+    if (!this.doc || !t || !isTable(t)) return;
+    const blocks = this.doc.blocks.slice();
+    blocks[tableIndex] = tables.toggleHeaderRow(t);
+    this.commitDoc("table", { ...this.doc, blocks });
+  }
+
+  showPanel(mode: "comments" | "a11y") {
+    const same = this.sideMode === mode && !this.side.hidden;
+    this.sideMode = mode;
+    this.showSide(!same);
+  }
+
   showSide(on: boolean) {
     this.side.hidden = !on;
     this.el.classList.toggle("with-side", on);
@@ -1276,6 +1317,10 @@ export class WordEditor implements EngineView {
 
   private refreshSide() {
     if (this.side.hidden || !this.doc) return;
+    if (this.sideMode === "a11y") {
+      this.side.replaceChildren(...renderA11yPanel(this));
+      return;
+    }
     const comments = this.doc.comments ?? [];
     const text = (bs: Block[]) => bs.map((b) => (isParagraph(b) ? b.inlines.map((i) => (i.type === "text" ? i.text : "")).join("") : "")).join("\n");
     this.side.replaceChildren(

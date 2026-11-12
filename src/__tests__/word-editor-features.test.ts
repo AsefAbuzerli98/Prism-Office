@@ -166,3 +166,31 @@ describe("RTF", () => {
     expect(blocks).toEqual([{ type: "paragraph", align: "right", inlines: [{ type: "text", text: "Salam ", marks: { size: 22 } }, { type: "text", text: "dünya", marks: { bold: true, color: "00AA00", size: 28 } }] }]);
   });
 });
+
+describe("accessibility panel and ink", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    globalThis.requestAnimationFrame ??= ((cb: FrameRequestCallback) => setTimeout(cb, 0)) as never;
+  });
+
+  it("lists issues and fixes alt text from the panel", async () => {
+    const { ed } = await setup();
+    await ed.insertImage(PNG_10x20);
+    ed.execute("accessibility");
+    const panel = ed.el.querySelector(".word-side")!;
+    expect(panel.textContent).toContain("Picture is missing alternative text.");
+    ed.setImageAlt({ block: 0, offset: 0 }, "Logo");
+    expect((ed.doc!.blocks[0] as Paragraph).inlines[0]).toMatchObject({ descr: "Logo" });
+    expect(ed.el.querySelector(".word-side")!.textContent).toContain("No accessibility issues found.");
+  });
+
+  it("converts ink strokes to shapes", async () => {
+    const { ed, host } = await setup();
+    const { openInkOverlay } = await import("../word/ink");
+    const ink = openInkOverlay(ed, host);
+    ink.strokes.push(Array.from({ length: 61 }, (_, i) => ({ x: 100 + 40 * Math.cos((i / 60) * 2 * Math.PI), y: 100 + 30 * Math.sin((i / 60) * 2 * Math.PI) })));
+    ink.toShapes();
+    expect((ed.doc!.blocks[0] as Paragraph).inlines[0]).toMatchObject({ type: "shape", preset: "ellipse" });
+    expect(ed.el.querySelector(".ink-layer")).toBeNull();
+  });
+});
