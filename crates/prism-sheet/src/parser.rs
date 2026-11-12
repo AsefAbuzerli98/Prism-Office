@@ -1120,6 +1120,38 @@ pub fn shift(e: &Expr, dr: i64, dc: i64) -> Expr {
     }
 }
 
+/// Rebuild an expression with every reference mapped by `f`.
+pub fn map_refs(e: &Expr, f: &dyn Fn(&RefExpr) -> Expr) -> Expr {
+    let m = |x: &Expr| map_refs(x, f);
+    match e {
+        Expr::Ref(r) => f(r),
+        Expr::Unary(op, x) => Expr::Unary(*op, Box::new(m(x))),
+        Expr::Binary(op, l, r) => Expr::Binary(*op, Box::new(m(l)), Box::new(m(r))),
+        Expr::Call(n, a) => Expr::Call(n.clone(), a.iter().map(m).collect()),
+        Expr::Invoke(x, a) => Expr::Invoke(Box::new(m(x)), a.iter().map(m).collect()),
+        Expr::Spill(x) => Expr::Spill(Box::new(m(x))),
+        Expr::Array(rows) => Expr::Array(rows.iter().map(|r| r.iter().map(m).collect()).collect()),
+        other => other.clone(),
+    }
+}
+
+/// Point references at sheet `old` to `new` (`#REF` turns them into `#REF!`).
+pub fn rename_sheet(e: &Expr, old: &str, new: &str) -> Expr {
+    map_refs(e, &|r| match &r.sheet {
+        Some(s) if s.eq_ignore_ascii_case(old) => {
+            if new == "#REF" {
+                Expr::Error(ErrorKind::Ref)
+            } else {
+                Expr::Ref(RefExpr {
+                    sheet: Some(new.to_string()),
+                    kind: r.kind.clone(),
+                })
+            }
+        }
+        _ => Expr::Ref(r.clone()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

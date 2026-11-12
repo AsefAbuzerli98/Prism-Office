@@ -21,6 +21,10 @@ pub enum DocError {
     Word(#[from] prism_word::Error),
     #[error("document {0} is not a word-processing document")]
     NotWord(u64),
+    #[error(transparent)]
+    Sheet(#[from] prism_sheet::xlsx::XlsxError),
+    #[error("document {0} is not a spreadsheet")]
+    NotSheet(u64),
     #[error("file extension `.{ext}` does not match a {kind:?}")]
     ExtensionMismatch { ext: String, kind: DocumentKind },
 }
@@ -52,6 +56,12 @@ struct OpenDocument {
     word: Option<prism_word::WordDocument>,
     /// The model has changes not yet written into `package`.
     word_dirty: bool,
+    /// Spreadsheet model and the package it was read from (lossless save).
+    sheet: Option<(
+        prism_sheet::model::WorkbookModel,
+        prism_sheet::xlsx::XlsxSource,
+    )>,
+    sheet_dirty: bool,
     /// Auto-recovery journal key, edit revision and last journaled revision.
     recovery_key: String,
     revision: u64,
@@ -63,6 +73,16 @@ pub struct DocumentRegistry {
     next_id: AtomicU64,
     docs: Mutex<HashMap<u64, OpenDocument>>,
     untitled: Mutex<HashMap<DocumentKind, u32>>,
+}
+
+/// "Now" as an Excel serial in local time (offset from the TZ environment is
+/// not available without a timezone database; UTC is used).
+pub fn now_serial() -> f64 {
+    let ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as f64)
+        .unwrap_or(0.0);
+    prism_sheet::functions::date::serial_from_unix_ms(ms, 0.0)
 }
 
 fn title_from_path(path: &Path) -> String {
@@ -110,6 +130,8 @@ impl DocumentRegistry {
             package: templates::blank(kind),
             word: None,
             word_dirty: false,
+            sheet: None,
+            sheet_dirty: false,
             recovery_key: String::new(),
             revision: 0,
             journaled: 0,
@@ -126,6 +148,8 @@ impl DocumentRegistry {
             package,
             word: None,
             word_dirty: false,
+            sheet: None,
+            sheet_dirty: false,
             recovery_key: String::new(),
             revision: 0,
             journaled: 0,
@@ -156,6 +180,12 @@ impl DocumentRegistry {
                 doc.word = Some(fresh);
             }
             doc.word_dirty = false;
+        }
+        if doc.sheet_dirty {
+            if let Some((m, src)) = &doc.sheet {
+                doc.package = prism_sheet::xlsx::write_package(m, Some(src), now_serial())?;
+            }
+            doc.sheet_dirty = false;
         }
         doc.package.save(&target)?;
         doc.title = title_from_path(&target);
@@ -211,6 +241,39 @@ impl DocumentRegistry {
         Ok(())
     }
 
+    fn ensure_sheet(doc: &mut OpenDocument, id: u64) -> Result<(), DocError> {
+        if doc.kind != DocumentKind::Workbook {
+            return Err(DocError::NotSheet(id));
+        }
+        if doc.sheet.is_none() {
+            doc.sheet = Some(prism_sheet::xlsx::read_package(doc.package.clone())?);
+        }
+        Ok(())
+    }
+
+    /// The spreadsheet model of a workbook.
+    pub fn sheet(&self, id: u64) -> Result<prism_sheet::model::WorkbookModel, DocError> {
+        let mut docs = self.docs.lock().unwrap();
+        let doc = docs.get_mut(&id).ok_or(DocError::NotFound(id))?;
+        Self::ensure_sheet(doc, id)?;
+        Ok(doc.sheet.as_ref().unwrap().0.clone())
+    }
+
+    /// Replace the spreadsheet model after an edit.
+    pub fn set_sheet(
+        &self,
+        id: u64,
+        model: prism_sheet::model::WorkbookModel,
+    ) -> Result<(), DocError> {
+        let mut docs = self.docs.lock().unwrap();
+        let doc = docs.get_mut(&id).ok_or(DocError::NotFound(id))?;
+        Self::ensure_sheet(doc, id)?;
+        doc.sheet.as_mut().unwrap().0 = model;
+        doc.sheet_dirty = true;
+        doc.revision += 1;
+        Ok(())
+    }
+
     /// Journal every document edited since the last tick (auto-recovery).
     pub fn journal_changes(&self, store: &crate::recovery::RecoveryStore) -> usize {
         let mut docs = self.docs.lock().unwrap();
@@ -219,8 +282,12 @@ impl DocumentRegistry {
             if doc.revision == doc.journaled {
                 continue;
             }
-            let Some(w) = &doc.word else { continue };
-            let Ok(content) = serde_json::to_value(w) else {
+            let content = match (&doc.word, &doc.sheet) {
+                (Some(w), _) => serde_json::to_value(w),
+                (None, Some((m, _))) => serde_json::to_value(m),
+                _ => continue,
+            };
+            let Ok(content) = content else {
                 continue;
             };
             let meta = crate::recovery::RecoveryMeta {
@@ -275,6 +342,15 @@ impl DocumentRegistry {
                 })
             })?;
             self.set_word(info.id, word)?;
+        } else if meta.kind == DocumentKind::Workbook {
+            let model: prism_sheet::model::WorkbookModel = serde_json::from_value(content)
+                .map_err(|e| {
+                    DocError::OpenXml(prism_openxml::Error::Xml {
+                        part: "recovery".into(),
+                        message: e.to_string(),
+                    })
+                })?;
+            self.set_sheet(info.id, model)?;
         }
         {
             let mut docs = self.docs.lock().unwrap();
@@ -406,6 +482,45 @@ mod tests {
         let (mime, data) = reg.word_image(reopened.id, &rel).unwrap().unwrap();
         assert_eq!((mime.as_str(), data), ("image/png", png));
         assert!(reg.word_fonts(reopened.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn workbook_model_edit_save_and_recover() {
+        let dir = std::env::temp_dir().join(format!("prism-sheet-doc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let reg = DocumentRegistry::default();
+        let d = reg.create(DocumentKind::Workbook);
+        let mut m = reg.sheet(d.id).unwrap();
+        assert_eq!(m.sheets[0].name, "Sheet1");
+        m.sheets[0].cells.push(prism_sheet::model::CellModel {
+            r: 0,
+            c: 0,
+            f: None,
+            v: Some(prism_sheet::model::CellValueModel::Number(21.0)),
+            s: 0,
+        });
+        m.sheets[0].cells.push(prism_sheet::model::CellModel {
+            r: 0,
+            c: 1,
+            f: Some("A1*2".into()),
+            v: None,
+            s: 0,
+        });
+        reg.set_sheet(d.id, m.clone()).unwrap();
+        let store = crate::recovery::RecoveryStore::new(dir.join("rec"));
+        assert_eq!(reg.journal_changes(&store), 1);
+        let path = dir.join("Book.xlsx");
+        reg.save(d.id, Some(&path)).unwrap();
+        let reopened = reg.open(&path).unwrap();
+        let m2 = reg.sheet(reopened.id).unwrap();
+        let b1 = m2.sheets[0].cells.iter().find(|c| c.c == 1).unwrap();
+        assert_eq!(b1.v, Some(prism_sheet::model::CellValueModel::Number(42.0)));
+        // recovery of an unsaved workbook
+        let key = reg.recovery_key(d.id).unwrap();
+        let restored = reg.restore(&store, &key).unwrap();
+        assert_eq!(reg.sheet(restored.id).unwrap().sheets[0].cells.len(), 2);
+        assert!(matches!(reg.word(restored.id), Err(DocError::NotWord(_))));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

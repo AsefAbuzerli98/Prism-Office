@@ -6,6 +6,7 @@
 //! TRIMRANGE, LAMBDA/LET), number formatting and XLSX import/export.
 
 pub mod addr;
+pub mod api;
 pub mod calc;
 pub mod eval;
 pub mod functions;
@@ -13,6 +14,8 @@ pub mod model;
 pub mod numfmt;
 pub mod parser;
 pub mod value;
+#[cfg(feature = "wasm")]
+pub mod wasm;
 pub mod workbook;
 #[cfg(feature = "xlsx")]
 pub mod xlsx;

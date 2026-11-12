@@ -146,7 +146,19 @@ fn edits_dynamic_arrays_and_new_sheets() {
         v: None,
         s: 0,
     });
+    while m.styles.len() < m.num_formats.len() {
+        m.styles.push(Default::default());
+    }
     m.num_formats.push("0.000".into());
+    let look = prism_sheet::model::CellStyle {
+        bold: true,
+        color: Some("#C00000".into()),
+        fill: Some("#FFF2CC".into()),
+        h_align: Some("center".into()),
+        border: 8,
+        ..Default::default()
+    };
+    m.styles.push(look.clone());
     let s = (m.num_formats.len() - 1) as u32;
     m.sheets[0].cells.push(CellModel {
         r: 10,

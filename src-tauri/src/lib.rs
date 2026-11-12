@@ -29,6 +29,23 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 pub const EVENT_CHANNEL: &str = "prism://event";
 
+#[tauri::command]
+fn get_sheet_model(
+    id: u64,
+    docs: State<'_, DocumentRegistry>,
+) -> Result<prism_sheet::model::WorkbookModel, DocError> {
+    docs.sheet(id)
+}
+
+#[tauri::command]
+fn update_sheet_model(
+    id: u64,
+    content: prism_sheet::model::WorkbookModel,
+    docs: State<'_, DocumentRegistry>,
+) -> Result<(), DocError> {
+    docs.set_sheet(id, content)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppInfo {
@@ -451,6 +468,8 @@ pub fn run() {
             close_document,
             list_documents,
             get_word_document,
+            get_sheet_model,
+            update_sheet_model,
             update_word_document,
             get_word_image,
             add_word_image,

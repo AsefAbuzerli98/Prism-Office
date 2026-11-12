@@ -436,7 +436,7 @@ fn python_cells_are_async() {
     assert_eq!(req.inputs[0].0, "A1");
     assert_eq!(req.inputs[0].1, vec![vec![serde_json::json!(2.0)]]);
     let c = prism_sheet::CellRef::new(0, 1);
-    wb.supply_async(req.key, 0, c, n(42.0));
+    wb.supply_async(&req.key, 0, c, n(42.0));
     wb.recalc(NOW);
     assert_eq!(wb.get(0, "B1"), n(42.0));
     // changing the input invalidates the cached answer

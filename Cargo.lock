@@ -3041,6 +3041,7 @@ dependencies = [
  "base64 0.22.1",
  "keyring",
  "prism-openxml",
+ "prism-sheet",
  "prism-word",
  "serde",
  "serde_json",

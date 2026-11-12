@@ -38,6 +38,60 @@ impl CellValueModel {
     }
 }
 
+fn no(b: &bool) -> bool {
+    !*b
+}
+
+/// Visual cell formatting (one per cell XF, parallel to `num_formats`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CellStyle {
+    #[serde(default, skip_serializing_if = "no")]
+    pub bold: bool,
+    #[serde(default, skip_serializing_if = "no")]
+    pub italic: bool,
+    #[serde(default, skip_serializing_if = "no")]
+    pub underline: bool,
+    #[serde(default, skip_serializing_if = "no")]
+    pub strike: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_name: Option<String>,
+    /// `#RRGGBB`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fill: Option<String>,
+    /// left | center | right | justify | fill | general
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub h_align: Option<String>,
+    /// top | center | bottom
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub v_align: Option<String>,
+    #[serde(default, skip_serializing_if = "no")]
+    pub wrap: bool,
+    /// Border bitmask: 1 left, 2 right, 4 top, 8 bottom.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub border: u8,
+}
+
+fn is_zero_u8(n: &u8) -> bool {
+    *n == 0
+}
+
+impl CellStyle {
+    pub fn has_font(&self) -> bool {
+        self.bold
+            || self.italic
+            || self.underline
+            || self.strike
+            || self.font_size.is_some()
+            || self.font_name.is_some()
+            || self.color.is_some()
+    }
+}
+
 fn is_zero(n: &u32) -> bool {
     *n == 0
 }
@@ -88,6 +142,9 @@ pub struct WorkbookModel {
     /// Number-format code per style (cell XF) index.
     #[serde(default)]
     pub num_formats: Vec<String>,
+    /// Visual style per style index (may be shorter than `num_formats`).
+    #[serde(default)]
+    pub styles: Vec<CellStyle>,
     #[serde(default)]
     pub date1904: bool,
 }
@@ -116,6 +173,7 @@ impl Workbook {
             },
             date1904: m.date1904,
             names: m.names.clone(),
+            styles: m.styles.clone(),
             ..Default::default()
         };
         for sm in &m.sheets {
@@ -202,6 +260,7 @@ impl Workbook {
                 .collect(),
             names: self.names.clone(),
             num_formats: self.num_formats.clone(),
+            styles: self.styles.clone(),
             date1904: self.date1904,
         }
     }

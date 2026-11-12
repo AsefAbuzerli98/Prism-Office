@@ -1,4 +1,5 @@
 import { blankDocument, type WordDocument } from "../word/model";
+import { blankWorkbook, type WorkbookModel } from "../sheet/model";
 import type { Mode } from "./modes";
 import { MODES, modeFromPath } from "./modes";
 
@@ -121,6 +122,9 @@ export interface HostBridge {
   /** Word-processing model of a document (Document mode). */
   getWordDocument(id: number): Promise<WordDocument>;
   updateWordDocument(id: number, content: WordDocument): Promise<void>;
+  /** Spreadsheet model of a workbook (Workbook mode). */
+  getSheetModel(id: number): Promise<WorkbookModel>;
+  updateSheetModel(id: number, content: WorkbookModel): Promise<void>;
   /** Picture bytes (base64) for an image relationship. */
   getWordImage(id: number, relId: string): Promise<{ mime: string; data: string } | null>;
   /** Store a picture in the package; returns its relationship id and EMU size. */
@@ -217,6 +221,12 @@ export class TauriHost implements HostBridge {
   }
   updateWordDocument(id: number, content: WordDocument) {
     return this.api.invoke<void>("update_word_document", { id, content });
+  }
+  getSheetModel(id: number) {
+    return this.api.invoke<WorkbookModel>("get_sheet_model", { id });
+  }
+  updateSheetModel(id: number, content: WorkbookModel) {
+    return this.api.invoke<void>("update_sheet_model", { id, content });
   }
   getWordImage(id: number, relId: string) {
     return this.api.invoke<{ mime: string; data: string } | null>("get_word_image", { id, relId });
@@ -393,6 +403,25 @@ export class BrowserHost implements HostBridge {
   async updateWordDocument(id: number, content: WordDocument): Promise<void> {
     if (!this.docs.has(id)) throw new Error(`no open document with id ${id}`);
     this.words.set(id, structuredClone(content));
+  }
+
+  private sheetModels = new Map<number, WorkbookModel>();
+
+  async getSheetModel(id: number): Promise<WorkbookModel> {
+    const doc = this.docs.get(id);
+    if (!doc) throw new Error(`no open document with id ${id}`);
+    if (doc.kind !== "workbook") throw new Error(`document ${id} is not a spreadsheet`);
+    let m = this.sheetModels.get(id);
+    if (!m) {
+      m = blankWorkbook();
+      this.sheetModels.set(id, m);
+    }
+    return structuredClone(m);
+  }
+
+  async updateSheetModel(id: number, content: WorkbookModel): Promise<void> {
+    if (!this.docs.has(id)) throw new Error(`no open document with id ${id}`);
+    this.sheetModels.set(id, structuredClone(content));
   }
 
   private images = new Map<string, { mime: string; data: string }>();

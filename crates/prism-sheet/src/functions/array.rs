@@ -30,7 +30,7 @@ pub const NAMES: &[&str] = &[
     "MUNIT",
 ];
 
-const MAX_CELLS: usize = 17_179_869_184 / 1024; // generous guard against runaway arrays
+const MAX_CELLS: usize = 16_777_216; // guard against runaway arrays (16M cells)
 
 fn rows_of(a: &Array) -> Vec<Vec<Value>> {
     (0..a.rows).map(|r| a.row_values(r).to_vec()).collect()

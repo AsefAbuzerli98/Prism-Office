@@ -300,8 +300,8 @@ impl Workbook {
     }
 
     /// Feed the answer to an asynchronous request (e.g. `=PY`) and mark the cell dirty.
-    pub fn supply_async(&mut self, key: u64, sheet: usize, c: CellRef, v: Value) {
-        self.async_results.insert((sheet, c), (key, v));
+    pub fn supply_async(&mut self, key: &str, sheet: usize, c: CellRef, v: Value) {
+        self.async_results.insert((sheet, c), (key.to_string(), v));
         self.async_requests
             .retain(|r| !(r.sheet == sheet && r.row == c.row && r.col == c.col));
         self.pending.insert((sheet, c));

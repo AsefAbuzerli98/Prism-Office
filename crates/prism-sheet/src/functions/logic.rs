@@ -115,7 +115,7 @@ fn py(ctx: &mut Ctx, args: &[Expr]) -> Value {
     serde_json::to_string(&inputs)
         .unwrap_or_default()
         .hash(&mut h);
-    let key = h.finish();
+    let key = format!("{:016x}", h.finish());
     if let Some((k, v)) = ctx.wb.async_results.get(&(ctx.sheet, ctx.cell)) {
         if *k == key {
             return v.clone();

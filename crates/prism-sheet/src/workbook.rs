@@ -75,11 +75,13 @@ pub struct Workbook {
     pub names: Vec<DefinedName>,
     /// Number-format code per style index (`General`, `0.00`, `yyyy-mm-dd` …).
     pub num_formats: Vec<String>,
+    /// Visual style per style index.
+    pub styles: Vec<crate::model::CellStyle>,
     /// Cells found in circular references during the last recalculation.
     pub circular: Vec<(usize, CellRef)>,
     /// Values supplied for asynchronous functions (`=PY`), by cell, tagged
     /// with the request key they answer (stale answers are ignored).
-    pub async_results: HashMap<(usize, CellRef), (u64, Value)>,
+    pub async_results: HashMap<(usize, CellRef), (String, Value)>,
     /// Pending asynchronous requests produced by the last recalculation.
     pub async_requests: Vec<AsyncRequest>,
     pub(crate) parsed_names: HashMap<String, Arc<Expr>>,
@@ -95,7 +97,7 @@ pub struct Workbook {
 #[serde(rename_all = "camelCase")]
 pub struct AsyncRequest {
     /// Hash of code + inputs; echo it back with the result.
-    pub key: u64,
+    pub key: String,
     pub sheet: usize,
     pub row: u32,
     pub col: u32,
@@ -416,6 +418,21 @@ impl Workbook {
                 })
             })
             .collect();
+    }
+
+    /// Index of a style with this number format and look, appending one if needed.
+    pub fn style_index(&mut self, num_format: &str, look: &crate::model::CellStyle) -> u32 {
+        while self.styles.len() < self.num_formats.len() {
+            self.styles.push(Default::default());
+        }
+        if let Some(i) = (0..self.num_formats.len())
+            .find(|&i| self.num_formats[i] == num_format && self.styles[i] == *look)
+        {
+            return i as u32;
+        }
+        self.num_formats.push(num_format.to_string());
+        self.styles.push(look.clone());
+        (self.num_formats.len() - 1) as u32
     }
 
     pub fn find_table(&self, name: &str) -> Option<(usize, &TableDef)> {

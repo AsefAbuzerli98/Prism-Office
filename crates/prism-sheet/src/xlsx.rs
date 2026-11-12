@@ -14,7 +14,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 
 use crate::addr::{a1, rect_a1, CellRef, Rect};
-use crate::model::{CellModel, CellValueModel, SheetModel, WorkbookModel};
+use crate::model::{CellModel, CellStyle, CellValueModel, SheetModel, WorkbookModel};
 use crate::parser::{self, WriteOptions};
 use crate::value::Value;
 use crate::workbook::{DefinedName, Input, TableDef, Workbook};
@@ -193,61 +193,271 @@ pub fn builtin_format(id: u32) -> Option<&'static str> {
     })
 }
 
-/// Number-format code for each cellXfs entry.
-fn parse_styles(xml: &[u8]) -> Result<Vec<String>> {
+const THEME: [&str; 12] = [
+    "FFFFFF", "000000", "E7E6E6", "44546A", "4472C4", "ED7D31", "A5A5A5", "FFC000", "5B9BD5",
+    "70AD47", "0563C1", "954F72",
+];
+
+/// `#RRGGBB` from a SpreadsheetML colour element's attributes.
+fn color_of(a: &[(String, String)]) -> Option<String> {
+    let get = |k: &str| a.iter().find(|(x, _)| x == k).map(|(_, v)| v.as_str());
+    let base = if let Some(rgb) = get("rgb") {
+        let h = rgb.trim_start_matches('#');
+        let h = if h.len() == 8 { &h[2..] } else { h };
+        u32::from_str_radix(h, 16).ok()?
+    } else if let Some(t) = get("theme") {
+        u32::from_str_radix(THEME.get(t.parse::<usize>().ok()?)?, 16).ok()?
+    } else if let Some(i) = get("indexed") {
+        match i.parse::<u32>().ok()? {
+            8 | 64 => 0x000000,
+            9 | 65 => 0xFFFFFF,
+            10 => 0xFF0000,
+            11 => 0x00FF00,
+            12 => 0x0000FF,
+            13 => 0xFFFF00,
+            14 => 0xFF00FF,
+            15 => 0x00FFFF,
+            _ => return None,
+        }
+    } else {
+        return None;
+    };
+    let tint: f64 = get("tint").and_then(|t| t.parse().ok()).unwrap_or(0.0);
+    let ch = |shift: u32| {
+        let c = ((base >> shift) & 0xFF) as f64;
+        let v = if tint < 0.0 {
+            c * (1.0 + tint)
+        } else {
+            c + (255.0 - c) * tint
+        };
+        v.round().clamp(0.0, 255.0) as u32
+    };
+    Some(format!("#{:02X}{:02X}{:02X}", ch(16), ch(8), ch(0)))
+}
+
+/// Number-format code and visual style for each cellXfs entry.
+fn parse_styles(xml: &[u8]) -> Result<(Vec<String>, Vec<CellStyle>)> {
     let mut r = Reader::from_reader(xml);
     let mut custom: HashMap<u32, String> = HashMap::new();
+    let mut fonts: Vec<CellStyle> = Vec::new();
+    let mut fills: Vec<Option<String>> = Vec::new();
+    let mut borders: Vec<u8> = Vec::new();
     let mut xfs = Vec::new();
-    let mut in_xfs = false;
+    let mut looks = Vec::new();
+    let mut section = String::new();
+    let mut in_pattern_solid = false;
+    let mut cur_border = 0u8;
     let mut buf = Vec::new();
     loop {
         buf.clear();
-        match r.read_event_into(&mut buf).map_err(|e| bad("styles", e))? {
-            Event::Start(e) | Event::Empty(e) => {
-                let n = name_of(&e);
-                let a = attrs_of(&e);
-                let get = |k: &str| a.iter().find(|(x, _)| x == k).map(|(_, v)| v.clone());
+        let ev = r.read_event_into(&mut buf).map_err(|e| bad("styles", e))?;
+        let (e, empty) = match &ev {
+            Event::Start(e) => (Some(e.clone()), false),
+            Event::Empty(e) => (Some(e.clone()), true),
+            _ => (None, false),
+        };
+        if let Some(e) = e {
+            let n = name_of(&e);
+            let a = attrs_of(&e);
+            let get = |k: &str| a.iter().find(|(x, _)| x == k).map(|(_, v)| v.clone());
+            let on = |k: &str| get(k).is_none_or_true();
+            match n.as_str() {
+                "numFmt" => {
+                    if let (Some(id), Some(code)) = (
+                        get("numFmtId").and_then(|x| x.parse().ok()),
+                        get("formatCode"),
+                    ) {
+                        custom.insert(id, code);
+                    }
+                }
+                "fonts" | "fills" | "borders" | "cellXfs" | "cellStyleXfs" | "dxfs" => {
+                    if !empty {
+                        section = n.clone();
+                    }
+                }
+                "font" if section == "fonts" => fonts.push(CellStyle::default()),
+                "b" if section == "fonts" => fonts
+                    .last_mut()
+                    .into_iter()
+                    .for_each(|f| f.bold = on("val")),
+                "i" if section == "fonts" => fonts
+                    .last_mut()
+                    .into_iter()
+                    .for_each(|f| f.italic = on("val")),
+                "strike" if section == "fonts" => fonts
+                    .last_mut()
+                    .into_iter()
+                    .for_each(|f| f.strike = on("val")),
+                "u" if section == "fonts" => fonts
+                    .last_mut()
+                    .into_iter()
+                    .for_each(|f| f.underline = get("val").as_deref() != Some("none")),
+                "sz" if section == "fonts" => fonts
+                    .last_mut()
+                    .into_iter()
+                    .for_each(|f| f.font_size = get("val").and_then(|v| v.parse().ok())),
+                "name" if section == "fonts" => fonts
+                    .last_mut()
+                    .into_iter()
+                    .for_each(|f| f.font_name = get("val")),
+                "color" if section == "fonts" => {
+                    let c = color_of(&a).filter(|c| c != "#000000");
+                    fonts
+                        .last_mut()
+                        .into_iter()
+                        .for_each(|f| f.color = c.clone())
+                }
+                "fill" if section == "fills" => fills.push(None),
+                "patternFill" if section == "fills" => {
+                    in_pattern_solid = get("patternType").as_deref() == Some("solid")
+                }
+                "fgColor" if section == "fills" && in_pattern_solid => {
+                    let c = color_of(&a);
+                    if let Some(f) = fills.last_mut() {
+                        *f = c;
+                    }
+                }
+                "border" if section == "borders" => {
+                    cur_border = 0;
+                    if empty {
+                        borders.push(0);
+                    }
+                }
+                "left" | "right" | "top" | "bottom" | "start" | "end" if section == "borders" => {
+                    if get("style").is_some_and(|s| s != "none") {
+                        cur_border |= match n.as_str() {
+                            "left" | "start" => 1,
+                            "right" | "end" => 2,
+                            "top" => 4,
+                            _ => 8,
+                        };
+                    }
+                }
+                "xf" if section == "cellXfs" => {
+                    let id: u32 = get("numFmtId").and_then(|x| x.parse().ok()).unwrap_or(0);
+                    xfs.push(
+                        custom
+                            .get(&id)
+                            .cloned()
+                            .or_else(|| builtin_format(id).map(String::from))
+                            .unwrap_or_else(|| "General".into()),
+                    );
+                    let idx = |k: &str| get(k).and_then(|x| x.parse::<usize>().ok()).unwrap_or(0);
+                    let mut look = fonts.get(idx("fontId")).cloned().unwrap_or_default();
+                    // the default font is the sheet's base font, not a style
+                    if idx("fontId") == 0 {
+                        look = CellStyle::default();
+                    }
+                    look.fill = fills.get(idx("fillId")).cloned().flatten();
+                    look.border = borders.get(idx("borderId")).copied().unwrap_or(0);
+                    looks.push(look);
+                }
+                "alignment" if section == "cellXfs" => {
+                    if let Some(l) = looks.last_mut() {
+                        l.h_align = get("horizontal").filter(|h| h != "general");
+                        l.v_align = get("vertical").filter(|v| v != "bottom");
+                        l.wrap = get("wrapText").is_some_and(|w| w == "1" || w == "true");
+                    }
+                }
+                _ => {}
+            }
+        }
+        match ev {
+            Event::End(e) => {
+                let n = e.local_name().into_inner().to_string();
                 match n.as_str() {
-                    "numFmt" => {
-                        if let (Some(id), Some(code)) = (
-                            get("numFmtId").and_then(|x| x.parse().ok()),
-                            get("formatCode"),
-                        ) {
-                            custom.insert(id, code);
-                        }
+                    "fonts" | "fills" | "borders" | "cellXfs" | "cellStyleXfs" | "dxfs" => {
+                        section.clear()
                     }
-                    "cellXfs" => in_xfs = true,
-                    "xf" if in_xfs => {
-                        let id: u32 = get("numFmtId").and_then(|x| x.parse().ok()).unwrap_or(0);
-                        xfs.push(
-                            custom
-                                .get(&id)
-                                .cloned()
-                                .or_else(|| builtin_format(id).map(String::from))
-                                .unwrap_or_else(|| "General".into()),
-                        );
-                    }
+                    "border" if section == "borders" => borders.push(cur_border),
+                    "patternFill" => in_pattern_solid = false,
                     _ => {}
                 }
             }
-            Event::End(e) if e.local_name().into_inner() == "cellXfs" => in_xfs = false,
             Event::Eof => break,
             _ => {}
         }
     }
     if xfs.is_empty() {
         xfs.push("General".into());
+        looks.push(CellStyle::default());
     }
-    Ok(xfs)
+    Ok((xfs, looks))
 }
 
-/// Append cell formats for number formats beyond the source's cellXfs.
-fn extend_styles(xml: &str, existing: usize, formats: &[String]) -> String {
+trait AttrBool {
+    fn is_none_or_true(&self) -> bool;
+}
+impl AttrBool for Option<String> {
+    fn is_none_or_true(&self) -> bool {
+        !matches!(self.as_deref(), Some("0") | Some("false"))
+    }
+}
+
+fn hex8(c: &str) -> String {
+    format!("FF{}", c.trim_start_matches('#').to_ascii_uppercase())
+}
+
+/// Insert `insert` before `</tag>` and add `n` to the count attribute.
+fn bump(s: &mut String, tag: &str, n: usize, insert: &str) -> bool {
+    let open = format!("<{tag}");
+    let Some(i) = s
+        .match_indices(&open)
+        .map(|(i, _)| i)
+        .find(|&i| matches!(s.as_bytes().get(i + open.len()), Some(b' ' | b'>' | b'/')))
+    else {
+        return false;
+    };
+    let end = s[i..].find('>').map(|e| e + i).unwrap();
+    let start_tag = s[i..=end].to_string();
+    if start_tag.ends_with("/>") {
+        let body = format!(r#"<{tag} count="{n}">{insert}</{tag}>"#);
+        s.replace_range(i..=end, &body);
+        return true;
+    }
+    let re = regex::Regex::new(r#"count="(\d+)""#).unwrap();
+    let new_tag = match re.captures(&start_tag) {
+        Some(c) => re
+            .replace(
+                &start_tag,
+                format!(r#"count="{}""#, c[1].parse::<usize>().unwrap_or(0) + n).as_str(),
+            )
+            .into_owned(),
+        None => start_tag.clone(),
+    };
+    s.replace_range(i..=end, &new_tag);
+    if let Some(close) = s.find(&format!("</{tag}>")) {
+        s.insert_str(close, insert);
+    }
+    true
+}
+
+fn count_of(s: &str, child: &str, parent: &str) -> usize {
+    let (Some(a), Some(b)) = (
+        s.find(&format!("<{parent}")),
+        s.find(&format!("</{parent}>")),
+    ) else {
+        return 0;
+    };
+    let open = format!("<{child}");
+    s[a..b]
+        .match_indices(&open)
+        .filter(|(i, _)| {
+            matches!(
+                s[a + i + open.len()..].as_bytes().first(),
+                Some(b' ' | b'>' | b'/')
+            )
+        })
+        .count()
+}
+
+/// Append cell formats (number format + font/fill/border/alignment) for
+/// styles created in the editor beyond the source's cellXfs.
+fn extend_styles(xml: &str, existing: usize, formats: &[String], looks: &[CellStyle]) -> String {
     if formats.len() <= existing {
         return xml.to_string();
     }
     let mut s = xml.to_string();
-    // custom numFmt ids start at 164
     let mut next_id = 164u32;
     for cap in regex::Regex::new(r#"numFmtId="(\d+)""#)
         .unwrap()
@@ -257,10 +467,21 @@ fn extend_styles(xml: &str, existing: usize, formats: &[String]) -> String {
             next_id = next_id.max(n + 1);
         }
     }
-    let mut fmts = String::new();
-    let mut xfs = String::new();
+    let (mut n_fonts, mut n_fills, mut n_borders) = (
+        count_of(&s, "font", "fonts"),
+        count_of(&s, "fill", "fills"),
+        count_of(&s, "border", "borders"),
+    );
+    let (mut fmts, mut fonts, mut fills, mut borders, mut xfs) = (
+        String::new(),
+        String::new(),
+        String::new(),
+        String::new(),
+        String::new(),
+    );
+    let (mut add_fonts, mut add_fills, mut add_borders) = (0, 0, 0);
     let mut ids: HashMap<String, u32> = HashMap::new();
-    for code in &formats[existing..] {
+    for (k, code) in formats.iter().enumerate().skip(existing) {
         let id = match (0..50).find(|i| builtin_format(*i) == Some(code.as_str())) {
             Some(b) => b,
             None => *ids.entry(code.clone()).or_insert_with(|| {
@@ -273,33 +494,106 @@ fn extend_styles(xml: &str, existing: usize, formats: &[String]) -> String {
                 id
             }),
         };
-        xfs.push_str(&format!(r#"<xf numFmtId="{id}" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>"#));
-    }
-    let added = formats.len() - existing;
-    let bump = |s: &mut String, tag: &str, n: usize, insert: &str| {
-        let open = format!("<{tag}");
-        if let Some(i) = s.find(&open) {
-            let end = s[i..].find('>').map(|e| e + i).unwrap();
-            let start_tag = s[i..=end].to_string();
-            let re = regex::Regex::new(r#"count="(\d+)""#).unwrap();
-            let new_tag = match re.captures(&start_tag) {
-                Some(c) => re
-                    .replace(
-                        &start_tag,
-                        format!(r#"count="{}""#, c[1].parse::<usize>().unwrap_or(0) + n).as_str(),
-                    )
-                    .into_owned(),
-                None => start_tag.clone(),
-            };
-            s.replace_range(i..=end, &new_tag);
-            if let Some(close) = s.find(&format!("</{tag}>")) {
-                s.insert_str(close, insert);
+        let look = looks.get(k).cloned().unwrap_or_default();
+        let font_id = if look.has_font() {
+            let mut f = String::from("<font>");
+            if look.bold {
+                f.push_str("<b/>");
             }
-            true
+            if look.italic {
+                f.push_str("<i/>");
+            }
+            if look.strike {
+                f.push_str("<strike/>");
+            }
+            if look.underline {
+                f.push_str("<u/>");
+            }
+            f.push_str(&format!(
+                r#"<sz val="{}"/>"#,
+                look.font_size.unwrap_or(11.0)
+            ));
+            if let Some(c) = &look.color {
+                f.push_str(&format!(r#"<color rgb="{}"/>"#, hex8(c)));
+            }
+            f.push_str(&format!(
+                r#"<name val="{}"/>"#,
+                escape_attr(look.font_name.as_deref().unwrap_or("Calibri"))
+            ));
+            f.push_str("</font>");
+            fonts.push_str(&f);
+            add_fonts += 1;
+            n_fonts += 1;
+            n_fonts - 1
         } else {
-            false
+            0
+        };
+        let fill_id = match &look.fill {
+            Some(c) => {
+                fills.push_str(&format!(r#"<fill><patternFill patternType="solid"><fgColor rgb="{}"/><bgColor indexed="64"/></patternFill></fill>"#, hex8(c)));
+                add_fills += 1;
+                n_fills += 1;
+                n_fills - 1
+            }
+            None => 0,
+        };
+        let border_id = if look.border != 0 {
+            let side = |bit: u8, name: &str| {
+                if look.border & bit != 0 {
+                    format!(r#"<{name} style="thin"><color auto="1"/></{name}>"#)
+                } else {
+                    format!("<{name}/>")
+                }
+            };
+            borders.push_str(&format!(
+                "<border>{}{}{}{}<diagonal/></border>",
+                side(1, "left"),
+                side(2, "right"),
+                side(4, "top"),
+                side(8, "bottom")
+            ));
+            add_borders += 1;
+            n_borders += 1;
+            n_borders - 1
+        } else {
+            0
+        };
+        let align = if look.h_align.is_some() || look.v_align.is_some() || look.wrap {
+            let mut a = String::from("<alignment");
+            if let Some(h) = &look.h_align {
+                a.push_str(&format!(r#" horizontal="{}""#, escape_attr(h)));
+            }
+            if let Some(v) = &look.v_align {
+                a.push_str(&format!(r#" vertical="{}""#, escape_attr(v)));
+            }
+            if look.wrap {
+                a.push_str(r#" wrapText="1""#);
+            }
+            a.push_str("/>");
+            Some(a)
+        } else {
+            None
+        };
+        let flags = format!(
+            r#" applyNumberFormat="1"{}{}{}{}"#,
+            if font_id > 0 { r#" applyFont="1""# } else { "" },
+            if fill_id > 0 { r#" applyFill="1""# } else { "" },
+            if border_id > 0 {
+                r#" applyBorder="1""#
+            } else {
+                ""
+            },
+            if align.is_some() {
+                r#" applyAlignment="1""#
+            } else {
+                ""
+            }
+        );
+        match align {
+            Some(a) => xfs.push_str(&format!(r#"<xf numFmtId="{id}" fontId="{font_id}" fillId="{fill_id}" borderId="{border_id}" xfId="0"{flags}>{a}</xf>"#)),
+            None => xfs.push_str(&format!(r#"<xf numFmtId="{id}" fontId="{font_id}" fillId="{fill_id}" borderId="{border_id}" xfId="0"{flags}/>"#)),
         }
-    };
+    }
     if !fmts.is_empty() {
         let n = fmts.matches("<numFmt ").count();
         if !bump(&mut s, "numFmts", n, &fmts) {
@@ -312,7 +606,16 @@ fn extend_styles(xml: &str, existing: usize, formats: &[String]) -> String {
             }
         }
     }
-    bump(&mut s, "cellXfs", added, &xfs);
+    if add_fonts > 0 {
+        bump(&mut s, "fonts", add_fonts, &fonts);
+    }
+    if add_fills > 0 {
+        bump(&mut s, "fills", add_fills, &fills);
+    }
+    if add_borders > 0 {
+        bump(&mut s, "borders", add_borders, &borders);
+    }
+    bump(&mut s, "cellXfs", formats.len() - existing, &xfs);
     s
 }
 
@@ -684,7 +987,11 @@ impl ZeroCheck for Option<String> {
 
 /// Read an `.xlsx` file into a model and its source package.
 pub fn read_xlsx(bytes: &[u8]) -> Result<(WorkbookModel, XlsxSource)> {
-    let pkg = Package::from_bytes(bytes)?;
+    read_package(Package::from_bytes(bytes)?)
+}
+
+/// Read an already-opened spreadsheet package.
+pub fn read_package(pkg: Package) -> Result<(WorkbookModel, XlsxSource)> {
     if pkg.kind()? != DocumentKind::Workbook {
         return Err(bad("package", "not a spreadsheet"));
     }
@@ -703,7 +1010,8 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(WorkbookModel, XlsxSource)> {
             .unwrap_or_default(),
         _ => vec![],
     };
-    let num_formats = match rels
+    let default_styles = || (vec!["General".to_string()], vec![CellStyle::default()]);
+    let (num_formats, looks) = match rels
         .first_of_type(rel_types::STYLES)
         .map(|r| wb_part.resolve(&r.target))
     {
@@ -711,11 +1019,12 @@ pub fn read_xlsx(bytes: &[u8]) -> Result<(WorkbookModel, XlsxSource)> {
             .part(&p)
             .map(parse_styles)
             .transpose()?
-            .unwrap_or_else(|| vec!["General".into()]),
-        _ => vec!["General".into()],
+            .unwrap_or_else(default_styles),
+        _ => default_styles(),
     };
     let mut model = WorkbookModel {
         num_formats: num_formats.clone(),
+        styles: looks,
         ..Default::default()
     };
     model.date1904 = wb_raw
@@ -1114,6 +1423,15 @@ const METADATA_XML: &str = r#"<metadata xmlns="http://schemas.openxmlformats.org
 
 /// Write a model to `.xlsx`, reusing `source` for lossless round-trips.
 pub fn write_xlsx(model: &WorkbookModel, source: Option<&XlsxSource>, now: f64) -> Result<Vec<u8>> {
+    Ok(write_package(model, source, now)?.to_bytes()?)
+}
+
+/// Build the output package for a model (see [`write_xlsx`]).
+pub fn write_package(
+    model: &WorkbookModel,
+    source: Option<&XlsxSource>,
+    now: f64,
+) -> Result<Package> {
     let mut wb = Workbook::from_model(model);
     wb.recalc(now);
     // async (=PY) cells keep their cached value instead of #BUSY!
@@ -1295,7 +1613,7 @@ pub fn write_xlsx(model: &WorkbookModel, source: Option<&XlsxSource>, now: f64) 
             let xml = part_text(&pkg, &sp)?;
             pkg.set_part(
                 sp,
-                extend_styles(&xml, existing, &model.num_formats).into_bytes(),
+                extend_styles(&xml, existing, &model.num_formats, &model.styles).into_bytes(),
                 None,
             );
         }
@@ -1368,7 +1686,7 @@ pub fn write_xlsx(model: &WorkbookModel, source: Option<&XlsxSource>, now: f64) 
     );
     pkg.set_part(wb_part.clone(), xml.into_bytes(), None);
     pkg.set_relationships(Some(&wb_part), &rels);
-    Ok(pkg.to_bytes()?)
+    Ok(pkg)
 }
 
 trait ChangedCheck<T> {

@@ -237,6 +237,11 @@ fn parse_date_part(t: &str) -> Option<f64> {
     None
 }
 
+/// Excel serial for a Unix timestamp in ms, shifted by a UTC offset in minutes.
+pub fn serial_from_unix_ms(ms: f64, offset_minutes: f64) -> f64 {
+    (ms + offset_minutes * 60_000.0) / 86_400_000.0 + EPOCH_1970 as f64
+}
+
 /// Parse text that Excel would coerce to a date/time serial.
 pub fn parse_date_text(t: &str) -> Option<f64> {
     let t = t.trim();
