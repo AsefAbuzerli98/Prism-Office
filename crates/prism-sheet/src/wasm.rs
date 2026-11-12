@@ -77,6 +77,7 @@ impl SheetEngine {
     }
 
     #[wasm_bindgen(js_name = applyStyle)]
+    #[allow(clippy::too_many_arguments)]
     pub fn apply_style(
         &mut self,
         sheet: usize,
@@ -154,6 +155,28 @@ impl SheetEngine {
             sheet,
             rect(sr0, sc0, sr1, sc1),
             rect(dr0, dc0, dr1, dc1),
+            now,
+        ))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn paste(
+        &mut self,
+        src_sheet: usize,
+        sr0: u32,
+        sc0: u32,
+        sr1: u32,
+        sc1: u32,
+        dst_sheet: usize,
+        dr: u32,
+        dc: u32,
+        now: f64,
+    ) -> String {
+        json(&self.e.paste(
+            src_sheet,
+            rect(sr0, sc0, sr1, sc1),
+            dst_sheet,
+            CellRef::new(dr, dc),
             now,
         ))
     }

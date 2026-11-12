@@ -12,6 +12,7 @@ export const sheetengine_functionNames: () => [number, number];
 export const sheetengine_input: (a: number, b: number, c: number, d: number) => [number, number];
 export const sheetengine_model: (a: number) => [number, number];
 export const sheetengine_new: (a: number, b: number, c: number) => [number, number, number];
+export const sheetengine_paste: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
 export const sheetengine_recalc: (a: number, b: number) => [number, number];
 export const sheetengine_renameSheet: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
 export const sheetengine_setColWidth: (a: number, b: number, c: number, d: number) => void;

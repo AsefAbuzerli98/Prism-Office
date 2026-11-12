@@ -207,8 +207,8 @@ fn color_of(a: &[(String, String)]) -> Option<String> {
         u32::from_str_radix(h, 16).ok()?
     } else if let Some(t) = get("theme") {
         u32::from_str_radix(THEME.get(t.parse::<usize>().ok()?)?, 16).ok()?
-    } else if let Some(i) = get("indexed") {
-        match i.parse::<u32>().ok()? {
+    } else {
+        match get("indexed")?.parse::<u32>().ok()? {
             8 | 64 => 0x000000,
             9 | 65 => 0xFFFFFF,
             10 => 0xFF0000,
@@ -219,8 +219,6 @@ fn color_of(a: &[(String, String)]) -> Option<String> {
             15 => 0x00FFFF,
             _ => return None,
         }
-    } else {
-        return None;
     };
     let tint: f64 = get("tint").and_then(|t| t.parse().ok()).unwrap_or(0.0);
     let ch = |shift: u32| {
@@ -444,7 +442,7 @@ fn count_of(s: &str, child: &str, parent: &str) -> usize {
         .match_indices(&open)
         .filter(|(i, _)| {
             matches!(
-                s[a + i + open.len()..].as_bytes().first(),
+                s.as_bytes()[a + i + open.len()..].first(),
                 Some(b' ' | b'>' | b'/')
             )
         })

@@ -209,6 +209,30 @@ export class SheetEngine {
         return this;
     }
     /**
+     * @param {number} src_sheet
+     * @param {number} sr0
+     * @param {number} sc0
+     * @param {number} sr1
+     * @param {number} sc1
+     * @param {number} dst_sheet
+     * @param {number} dr
+     * @param {number} dc
+     * @param {number} now
+     * @returns {string}
+     */
+    paste(src_sheet, sr0, sc0, sr1, sc1, dst_sheet, dr, dc, now) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.sheetengine_paste(this.__wbg_ptr, src_sheet, sr0, sc0, sr1, sc1, dst_sheet, dr, dc, now);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * @param {number} now
      * @returns {string}
      */

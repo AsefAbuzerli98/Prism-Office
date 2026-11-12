@@ -321,6 +321,7 @@ pub fn call(ctx: &mut Ctx, name: &str, args: &[Expr]) -> Option<Value> {
                 ErrorKind::Spill => 9.0,
                 ErrorKind::Calc => 14.0,
                 ErrorKind::Busy => 8.0,
+                ErrorKind::Python => 19.0,
             }),
             _ => Value::Error(ErrorKind::NA),
         }),

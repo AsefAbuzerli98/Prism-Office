@@ -20,6 +20,8 @@ pub enum ErrorKind {
     Calc,
     /// Waiting for an asynchronous result (e.g. `=PY`).
     Busy,
+    /// A Python cell failed (`=PY`).
+    Python,
 }
 
 impl ErrorKind {
@@ -35,6 +37,7 @@ impl ErrorKind {
             Self::Spill => "#SPILL!",
             Self::Calc => "#CALC!",
             Self::Busy => "#BUSY!",
+            Self::Python => "#PYTHON!",
         }
     }
     pub fn parse(s: &str) -> Option<Self> {
@@ -49,6 +52,7 @@ impl ErrorKind {
             "#SPILL!" => Self::Spill,
             "#CALC!" => Self::Calc,
             "#BUSY!" => Self::Busy,
+            "#PYTHON!" => Self::Python,
             _ => return None,
         })
     }

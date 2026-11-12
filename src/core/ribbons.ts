@@ -190,6 +190,40 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
   workbook: [
     FILE_TAB,
     {
+      id: "home",
+      label: "Home",
+      groups: [
+        {
+          id: "clipboard",
+          label: "Clipboard",
+          commands: [cmd("xl.paste", "Paste", "📋", 3), cmd("xl.copy", "Copy", "⧉", 3), cmd("xl.cut", "Cut", "✂", 3), cmd("xl.undo", "Undo", "↶", 3), cmd("xl.redo", "Redo", "↷", 3)],
+        },
+        {
+          id: "font",
+          label: "Font",
+          commands: [
+            cmd("xl.bold", "Bold", "B", 3),
+            cmd("xl.italic", "Italic", "I", 3),
+            cmd("xl.underline", "Underline", "U", 3),
+            cmd("xl.fill", "Fill Color", "▆", 3),
+            cmd("xl.color", "Font Color", "A", 3),
+            cmd("xl.border", "Borders", "▢", 3),
+          ],
+        },
+        {
+          id: "alignment",
+          label: "Alignment",
+          commands: [cmd("xl.alignLeft", "Left", "⇤", 3), cmd("xl.alignCenter", "Center", "↔", 3), cmd("xl.alignRight", "Right", "⇥", 3), cmd("xl.wrap", "Wrap Text", "↩", 3)],
+        },
+        { id: "number", label: "Number", commands: [cmd("xl.numfmt", "Number Format", "#", 3), cmd("xl.percent", "Percent", "%", 3)] },
+        {
+          id: "cells",
+          label: "Cells",
+          commands: [cmd("xl.autoSum", "AutoSum", "Σ", 3), cmd("xl.freeze", "Freeze Panes", "❄", 3), cmd("xl.addSheet", "New Sheet", "＋", 3)],
+        },
+      ],
+    },
+    {
       id: "data",
       label: "Data Connections",
       groups: [

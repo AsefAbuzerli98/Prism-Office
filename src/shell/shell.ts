@@ -9,6 +9,8 @@ import { applyTheme } from "../core/theme";
 import { renderHub } from "../hub/hub";
 import { renderEngineView } from "../modes/views";
 import { WordEditor, type EngineView } from "../word/editor";
+import { SheetEditor } from "../sheet/editor";
+import type { AsyncRequest } from "../sheet/engine";
 import { IMPLEMENTED_PHASE } from "../core/ribbons";
 import { openPicker } from "./picker";
 import { openSourcesDialog } from "./sources-dialog";
@@ -58,6 +60,7 @@ export class Shell {
     this.palette = new CommandPalette(root, this.commands);
     this.registerCommands();
     this.registerWordCommands();
+    this.registerSheetCommands();
 
     root.replaceChildren(
       h("div", { class: "titlebar", "data-tauri-drag-region": true }, this.strip),
@@ -256,6 +259,56 @@ export class Shell {
     return e instanceof WordEditor ? e : null;
   }
 
+  /** The active tab's spreadsheet editor, if any. */
+  get activeSheet(): SheetEditor | null {
+    const tab = this.showHub ? null : this.tabs.active;
+    const e = tab ? this.views.get(tab.docId)?.engine : null;
+    return e instanceof SheetEditor ? e : null;
+  }
+
+  private registerSheetCommands() {
+    const ed = () => this.activeSheet;
+    const when = () => ed()?.wb != null;
+    const simple = (id: string, cmd: string) => ({
+      id,
+      title: () => t(`ribbon.cmd.${id}`, {}, id),
+      when,
+      hidden: true,
+      run: () => {
+        ed()?.execute(cmd);
+        ed()?.focus();
+      },
+    });
+    const insert = (id: string, text: string) => ({ ...simple(id, "insert"), run: () => void ed()?.execute("insert", text) });
+    this.commands.register(
+      simple("xl.copy", "copy"),
+      simple("xl.cut", "cut"),
+      simple("xl.paste", "paste"),
+      simple("xl.undo", "undo"),
+      simple("xl.redo", "redo"),
+      simple("xl.bold", "bold"),
+      simple("xl.italic", "italic"),
+      simple("xl.underline", "underline"),
+      simple("xl.border", "border"),
+      simple("xl.alignLeft", "alignLeft"),
+      simple("xl.alignCenter", "alignCenter"),
+      simple("xl.alignRight", "alignRight"),
+      simple("xl.wrap", "wrap"),
+      { ...simple("xl.percent", "numfmt:0%") },
+      { ...simple("xl.autoSum", "autoSum"), hidden: false },
+      { ...simple("xl.freeze", "freeze"), hidden: false },
+      { ...simple("xl.addSheet", "addSheet"), hidden: false, keys: ["Shift+F11"] },
+      { ...simple("xl.fill", "fill"), run: () => void ed()?.execute("fill", "#FFF2CC") },
+      { ...simple("xl.color", "color"), run: () => void ed()?.execute("color", "#C00000") },
+      { ...simple("xl.numfmt", "numfmt"), run: () => void ed()?.execute("numfmt", "#,##0.00") },
+      insert("xl.groupby", "=GROUPBY("),
+      insert("xl.pivotby", "=PIVOTBY("),
+      insert("xl.regex", "=REGEXEXTRACT("),
+      insert("xl.xlookup", "=XLOOKUP("),
+      insert("xl.py", '=PY("'),
+    );
+  }
+
   private registerWordCommands() {
     const ed = () => this.activeEditor;
     const when = () => ed()?.doc != null;
@@ -303,6 +356,39 @@ export class Shell {
 
   /** Ribbon commands that need an anchored picker. */
   private pickerCommand(id: string, anchor: HTMLElement): boolean {
+    const sh = this.activeSheet;
+    if (sh?.wb) {
+      const colors = [["", t("sheet.none", {}, "None")], ["#FFF2CC", "Yellow"], ["#E2EFDA", "Green"], ["#DDEBF7", "Blue"], ["#FCE4D6", "Orange"], ["#C00000", "Red"], ["#1F4E78", "Navy"], ["#000000", "Black"]];
+      const pick = (items: { value: string; label: string; style?: string; selected?: boolean }[], cmd: string, title: string) => {
+        openPicker(anchor, items, (v) => {
+          sh.execute(cmd, v);
+          sh.focus();
+        }, title);
+        return true;
+      };
+      const st = sh.state();
+      if (id === "xl.fill" || id === "xl.color")
+        return pick(colors.map(([v, l]) => ({ value: v!, label: l!, style: v ? `border-left:14px solid ${v};padding-left:6px` : "" })), id === "xl.fill" ? "fill" : "color", t(`ribbon.cmd.${id}`, {}, id));
+      if (id === "xl.numfmt") {
+        const formats: [string, string][] = [
+          ["General", "General"],
+          ["0", "Number (0)"],
+          ["#,##0.00", "Number (1,234.56)"],
+          ['"$"#,##0.00', "Currency ($)"],
+          ['#,##0.00 "₼"', "Currency (₼)"],
+          ["0.00%", "Percent"],
+          ["0.00E+00", "Scientific"],
+          ["# ?/?", "Fraction"],
+          ["yyyy-mm-dd", "Date (ISO)"],
+          ["dd.mm.yyyy", "Date (dd.mm.yyyy)"],
+          ["d mmmm yyyy", "Long date"],
+          ["hh:mm:ss", "Time"],
+          ["@", "Text"],
+        ];
+        return pick(formats.map(([v, l]) => ({ value: v, label: l, selected: v === st.numFormat })), "numfmt", t("ribbon.cmd.xl.numfmt", {}, "Number Format"));
+      }
+      return false;
+    }
     const ed = this.activeEditor;
     if (!ed?.doc) return false;
     const st = ed.state();
@@ -439,6 +525,22 @@ export class Shell {
   };
 
   private ribbonActive = (id: string) => {
+    const sh = this.activeSheet;
+    if (sh?.wb) {
+      const st = sh.state();
+      switch (id) {
+        case "xl.bold": return !!st.style.bold;
+        case "xl.italic": return !!st.style.italic;
+        case "xl.underline": return !!st.style.underline;
+        case "xl.wrap": return !!st.style.wrap;
+        case "xl.border": return !!st.style.border;
+        case "xl.alignLeft": return st.style.hAlign === "left";
+        case "xl.alignCenter": return st.style.hAlign === "center";
+        case "xl.alignRight": return st.style.hAlign === "right";
+        case "xl.freeze": return st.frozen;
+        default: return false;
+      }
+    }
     const ed = this.activeEditor;
     if (!ed?.doc) return false;
     const st = ed.state();
@@ -657,6 +759,21 @@ export class Shell {
           (err) => this.flash(String(err instanceof Error ? err.message : err), true),
         );
         view = { el: engine.el, engine };
+      } else if (active.mode === "workbook") {
+        const docId = active.docId;
+        const engine = new SheetEditor(this.host, docId, {
+          onDirty: () => this.tabs.update(docId, { dirty: true }),
+          onState: () => {
+            if (this.tabs.active?.docId === docId && !this.showHub) this.renderRibbon(this.tabs.active);
+          },
+          onError: (msg) => this.flash(msg, true),
+          onAsync: (ed, reqs) => void this.runAsync(ed, reqs),
+        });
+        engine.ready.then(
+          () => engine.focus(),
+          (err) => this.flash(String(err instanceof Error ? err.message : err), true),
+        );
+        view = { el: engine.el, engine };
       } else {
         view = { el: renderEngineView(active.mode), engine: null };
       }
@@ -666,6 +783,21 @@ export class Shell {
     if (!attached) {
       this.workspace.replaceChildren(view.el);
       view.engine?.focus();
+    }
+  }
+
+  /** `=PY` cells: run them in the host's Python sandbox. */
+  private async runAsync(ed: SheetEditor, reqs: AsyncRequest[]) {
+    for (const req of reqs) {
+      if (req.function !== "PY") continue;
+      try {
+        const res = await this.host.runPython(req.code, req.inputs, req.returnType);
+        ed.supplyAsync(req, res.error ? { e: "#PYTHON!" } : res.value);
+        if (res.error) this.flash(res.error, true);
+      } catch (err) {
+        ed.supplyAsync(req, { e: "#PYTHON!" });
+        this.flash(String(err instanceof Error ? err.message : err), true);
+      }
     }
   }
 

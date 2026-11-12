@@ -87,6 +87,19 @@ export interface AiResponse {
   refusal?: string;
 }
 
+export interface PyResult {
+  value: unknown;
+  stdout: string;
+  error: string | null;
+}
+
+export interface PyStatus {
+  available: boolean;
+  interpreter: string | null;
+  version: string | null;
+  pandas: boolean;
+}
+
 /** Mirrors `events::AppEvent`. */
 export type AppEvent =
   | { type: "documentOpened"; info: DocumentInfo }
@@ -125,6 +138,9 @@ export interface HostBridge {
   /** Spreadsheet model of a workbook (Workbook mode). */
   getSheetModel(id: number): Promise<WorkbookModel>;
   updateSheetModel(id: number, content: WorkbookModel): Promise<void>;
+  /** Run one `=PY` cell in the host's Python sandbox. */
+  runPython(code: string, inputs: unknown, returnType: number): Promise<PyResult>;
+  pythonStatus(): Promise<PyStatus>;
   /** Picture bytes (base64) for an image relationship. */
   getWordImage(id: number, relId: string): Promise<{ mime: string; data: string } | null>;
   /** Store a picture in the package; returns its relationship id and EMU size. */
@@ -221,6 +237,12 @@ export class TauriHost implements HostBridge {
   }
   updateWordDocument(id: number, content: WordDocument) {
     return this.api.invoke<void>("update_word_document", { id, content });
+  }
+  runPython(code: string, inputs: unknown, returnType: number) {
+    return this.api.invoke<PyResult>("run_python", { code, inputs, returnType });
+  }
+  pythonStatus() {
+    return this.api.invoke<PyStatus>("python_status");
   }
   getSheetModel(id: number) {
     return this.api.invoke<WorkbookModel>("get_sheet_model", { id });
@@ -406,6 +428,14 @@ export class BrowserHost implements HostBridge {
   }
 
   private sheetModels = new Map<number, WorkbookModel>();
+
+  async runPython(): Promise<PyResult> {
+    return { value: null, stdout: "", error: "Python in cells needs the desktop app (no Python runtime in the browser preview)" };
+  }
+
+  async pythonStatus(): Promise<PyStatus> {
+    return { available: false, interpreter: null, version: null, pandas: false };
+  }
 
   async getSheetModel(id: number): Promise<WorkbookModel> {
     const doc = this.docs.get(id);

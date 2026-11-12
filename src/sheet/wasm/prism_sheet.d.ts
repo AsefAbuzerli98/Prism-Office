@@ -23,6 +23,7 @@ export class SheetEngine {
      * Load a `WorkbookModel` (JSON) and calculate it. `now` is an Excel serial.
      */
     constructor(model_json: string, now: number);
+    paste(src_sheet: number, sr0: number, sc0: number, sr1: number, sc1: number, dst_sheet: number, dr: number, dc: number, now: number): string;
     recalc(now: number): string;
     renameSheet(sheet: number, name: string, now: number): string;
     /**
@@ -59,6 +60,7 @@ export interface InitOutput {
     readonly sheetengine_input: (a: number, b: number, c: number, d: number) => [number, number];
     readonly sheetengine_model: (a: number) => [number, number];
     readonly sheetengine_new: (a: number, b: number, c: number) => [number, number, number];
+    readonly sheetengine_paste: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly sheetengine_recalc: (a: number, b: number) => [number, number];
     readonly sheetengine_renameSheet: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly sheetengine_setColWidth: (a: number, b: number, c: number, d: number) => void;

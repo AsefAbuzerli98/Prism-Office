@@ -15,6 +15,8 @@ export interface ViewCell {
   k: "n" | "s" | "b" | "e" | "f" | "-";
   s?: number;
   color?: string;
+  /** Raw number of numeric cells. */
+  n?: number;
   spill?: boolean;
 }
 
@@ -146,6 +148,10 @@ export class Workbook {
 
   fill(sheet: number, src: Rect, dst: Rect): Change {
     return JSON.parse(this.e.fill(sheet, src.r0, src.c0, src.r1, src.c1, dst.r0, dst.c0, dst.r1, dst.c1, nowSerial())) as Change;
+  }
+
+  paste(srcSheet: number, src: Rect, dstSheet: number, r: number, c: number): Change {
+    return JSON.parse(this.e.paste(srcSheet, src.r0, src.c0, src.r1, src.c1, dstSheet, r, c, nowSerial())) as Change;
   }
 
   asyncRequests(): AsyncRequest[] {

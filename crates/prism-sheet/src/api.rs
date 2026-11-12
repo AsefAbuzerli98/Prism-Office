@@ -25,6 +25,9 @@ pub struct ViewCell {
     /// Number-format colour (`[Red]`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Raw number for numeric cells (status-bar aggregates).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub n: Option<f64>,
     /// Part of a spill (not the anchor).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub spill: bool,
@@ -189,7 +192,13 @@ impl Engine {
                     _ => return None,
                 };
                 let f = numfmt::format_value(&v, fmt(style));
+                let n = if let Value::Number(x) = v {
+                    Some(x)
+                } else {
+                    None
+                };
                 Some(ViewCell {
+                    n,
                     r: k.row,
                     c: k.col,
                     t: f.text,
@@ -412,6 +421,58 @@ impl Engine {
             }
         }
         self.edit(&edits, now)
+    }
+
+    /// Paste a copied block: formulas shift relative to the new position,
+    /// styles are copied. `src_sheet` may differ from `dst_sheet`.
+    pub fn paste(
+        &mut self,
+        src_sheet: usize,
+        src: Rect,
+        dst_sheet: usize,
+        dst: CellRef,
+        now: f64,
+    ) -> Change {
+        let mut edits = Vec::new();
+        let mut styles = Vec::new();
+        for r in src.r0..=src.r1 {
+            for c in src.c0..=src.c1 {
+                let from = CellRef::new(r, c);
+                let (tr, tc) = (
+                    dst.row as i64 + (r - src.r0) as i64,
+                    dst.col as i64 + (c - src.c0) as i64,
+                );
+                if tr >= crate::addr::MAX_ROWS as i64 || tc >= crate::addr::MAX_COLS as i64 {
+                    continue;
+                }
+                let cell = self.wb.sheets[src_sheet].cells.get(&from);
+                let text = match cell.map(|x| &x.input) {
+                    Some(Input::Formula { expr, .. }) => {
+                        let moved = crate::parser::shift(expr, tr - r as i64, tc - c as i64);
+                        format!(
+                            "={}",
+                            crate::parser::to_formula(&moved, &Default::default())
+                        )
+                    }
+                    _ => self.wb.input_text(src_sheet, from),
+                };
+                styles.push((
+                    CellRef::new(tr as u32, tc as u32),
+                    cell.map(|x| x.style).unwrap_or(0),
+                ));
+                edits.push(Edit {
+                    sheet: dst_sheet,
+                    r: tr as u32,
+                    c: tc as u32,
+                    text,
+                });
+            }
+        }
+        let ch = self.edit(&edits, now);
+        for (k, s) in styles {
+            self.wb.set_style(dst_sheet, k, s);
+        }
+        ch
     }
 
     #[allow(clippy::type_complexity)]

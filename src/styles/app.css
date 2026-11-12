@@ -38,6 +38,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #app {
   display: grid;
   grid-template-rows: var(--titlebar-h) auto 1fr 26px;
+  grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -79,7 +80,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .doc-tab-close:hover { background: var(--border); color: var(--text); }
 
 /* ---- Ribbon -------------------------------------------------------------- */
-.ribbon { background: var(--surface); border-bottom: 1px solid var(--border); }
+.ribbon { background: var(--surface); border-bottom: 1px solid var(--border); min-width: 0; }
 .ribbon-tabs { display: flex; gap: 4px; padding: 4px 12px 0; }
 .ribbon-tab {
   border: 0; background: transparent; padding: 6px 10px; border-bottom: 2px solid transparent; color: var(--muted);
@@ -99,7 +100,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .cmd-label { font-size: 11px; white-space: nowrap; }
 
 /* ---- Workspace & engine views ------------------------------------------- */
-.workspace { position: relative; overflow: auto; }
+.workspace { position: relative; overflow: auto; min-width: 0; }
 .engine-view { position: absolute; inset: 0; background: var(--bg); }
 .engine-canvas { display: block; }
 
@@ -266,3 +267,25 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ink-layer { position: absolute; inset: 0; z-index: 5; background: rgba(255,255,255,.35); touch-action: none; }
 .ink-canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
 .ink-bar { position: absolute; inset-inline: 0; bottom: 12px; margin: auto; width: max-content; display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,.15); }
+
+/* ---- Workbook mode ---------------------------------------------------------------- */
+.sheet-editor { position: absolute; inset: 0; display: grid; grid-template-rows: auto 1fr auto; background: #fff; color: #111827; }
+.sheet-fbar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--border, #e5e7eb); background: var(--bg, #fff); }
+.sheet-namebox { width: 96px; font: 13px ui-monospace, monospace; padding: 3px 6px; border: 1px solid #d1d5db; border-radius: 4px; }
+.sheet-fx { color: #6b7280; font-style: italic; font-family: Georgia, serif; padding: 0 4px; }
+.sheet-formula { flex: 1; font: 13px ui-monospace, Consolas, monospace; padding: 3px 6px; border: 1px solid #d1d5db; border-radius: 4px; }
+.sheet-formula:focus, .sheet-namebox:focus { outline: 2px solid var(--accent, #059669); outline-offset: -1px; }
+.sheet-main { position: relative; overflow: hidden; }
+.sheet-scroll { position: absolute; inset: 0; overflow: auto; outline: none; cursor: cell; }
+.sheet-spacer { pointer-events: none; }
+.sheet-canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
+.sheet-cell-editor { position: absolute; z-index: 2; resize: none; overflow: hidden; margin: 0; padding: 1px 3px; border: 2px solid var(--accent, #059669); font: 14.7px Calibri, Carlito, "Segoe UI", system-ui, sans-serif; line-height: 18px; background: #fff; color: #111827; box-shadow: 0 2px 8px rgba(0,0,0,.15); white-space: pre; }
+.sheet-ac { position: absolute; z-index: 3; margin: 0; padding: 4px 0; list-style: none; background: #fff; border: 1px solid #d1d5db; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.15); font: 12.5px ui-monospace, monospace; min-width: 180px; }
+.sheet-ac li { padding: 3px 10px; cursor: pointer; }
+.sheet-ac li.active { background: var(--accent-soft, #d1fae5); color: var(--accent-strong, #047857); }
+.sheet-bottom { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border, #e5e7eb); background: #f9fafb; min-height: 28px; }
+.sheet-tabs { display: flex; overflow-x: auto; }
+.sheet-tab { border: none; border-right: 1px solid #e5e7eb; background: transparent; padding: 4px 14px; font: 12.5px system-ui, sans-serif; color: #374151; cursor: pointer; }
+.sheet-tab.active { background: #fff; color: var(--accent-strong, #047857); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent, #059669); }
+.sheet-tab.add { font-weight: 600; color: #6b7280; }
+.sheet-stats { padding: 0 12px; font: 12px system-ui, sans-serif; color: #4b5563; white-space: pre; }

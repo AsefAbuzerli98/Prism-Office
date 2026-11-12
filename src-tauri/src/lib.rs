@@ -8,6 +8,7 @@ pub mod ai;
 pub mod documents;
 pub mod events;
 pub mod launch;
+pub mod python;
 pub mod recent;
 pub mod recovery;
 pub mod services;
@@ -28,6 +29,30 @@ use settings::{Settings, SettingsStore};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 pub const EVENT_CHANNEL: &str = "prism://event";
+
+/// Run one `=PY` cell off the main thread.
+#[tauri::command]
+async fn run_python(
+    code: String,
+    inputs: serde_json::Value,
+    return_type: i32,
+) -> Result<python::PyResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        python::run(
+            &code,
+            &inputs,
+            return_type,
+            std::time::Duration::from_secs(30),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn python_status() -> python::PyStatus {
+    python::status()
+}
 
 #[tauri::command]
 fn get_sheet_model(
@@ -469,6 +494,8 @@ pub fn run() {
             list_documents,
             get_word_document,
             get_sheet_model,
+            run_python,
+            python_status,
             update_sheet_model,
             update_word_document,
             get_word_image,
