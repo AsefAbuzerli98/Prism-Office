@@ -1,0 +1,16 @@
+#!/bin/sh
+# Fast checks on staged changes. Full clippy/tests run in CI.
+set -e
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+staged="$(git diff --cached --name-only --diff-filter=ACM)"
+
+if echo "$staged" | grep -q '\.rs$'; then
+  echo "• cargo fmt --check"
+  cargo fmt --all -- --check || { echo "✖ Run 'cargo fmt --all' and re-stage."; exit 1; }
+fi
+
+if echo "$staged" | grep -qE '\.(ts|tsx|mjs)$'; then
+  echo "• tsc --noEmit"
+  pnpm exec tsc --noEmit
+fi

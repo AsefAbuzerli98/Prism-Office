@@ -14,6 +14,7 @@ src-tauri/              Native host: window, IPC commands, document registry
 src/core/               Modes, ribbons, tab model, host bridge, theming
 src/hub/                Application Hub (mode selection gateway)
 src/shell/              Tabbed-MDI shell + ribbon
+crates/prism-word/      DOCX ⇄ document model (lossless import/export)
 src/modes/              Engine views (placeholders until Phases 2–4)
 ```
 
@@ -33,6 +34,10 @@ pnpm tauri dev      # native app
 ```bash
 pnpm dev            # browser preview (in-memory host, no file I/O)
 ```
+
+Git hooks (`.githooks/`: rustfmt + typecheck on commit, Conventional Commits
+message check) are enabled automatically by `pnpm install`.
+Architecture decisions live in [`docs/adr/`](./docs/adr/).
 
 Tests:
 

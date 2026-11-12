@@ -14,8 +14,8 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 - [x] **P0-02** TypeScript strict config, Vite build, Vitest unit tests.
 - [x] **P0-03** Rust lint/format baseline (`rustfmt`, `clippy -D warnings`).
 - [x] **P0-04** CI workflow: Rust tests + clippy, frontend typecheck + tests + build.
-- [ ] **P0-05** Pre-commit hooks (fmt, lint) and conventional-commit check.
-- [ ] **P0-06** Architecture Decision Records folder (`docs/adr/`) — ADR-001 stack choice.
+- [x] **P0-05** Pre-commit hooks (fmt, typecheck) and conventional-commit check (`.githooks/`, enabled by `pnpm install`).
+- [x] **P0-06** Architecture Decision Records folder (`docs/adr/`) — ADR-0001 stack choice, ADR-0002 lossless OpenXML model.
 
 ## Phase 1 — Shell & Hub Runtime
 
