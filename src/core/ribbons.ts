@@ -119,7 +119,7 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
     },
     {
       id: "citations",
-      label: "References",
+      label: "Citations",
       groups: [
         {
           id: "notes",
