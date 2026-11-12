@@ -8,10 +8,12 @@ use crate::value::{Array, ErrorKind, Value};
 pub const NAMES: &[&str] = &["REGEXTEST", "REGEXEXTRACT", "REGEXREPLACE"];
 
 /// Compile with Excel's case_sensitivity argument (0 = sensitive, 1 = insensitive).
-pub fn compile(pattern: &str, insensitive: bool) -> Result<regex::Regex, ErrorKind> {
-    regex::RegexBuilder::new(pattern)
+/// `fancy-regex` adds PCRE features Excel supports (look-around, back-references,
+/// atomic groups) on top of the linear-time engine; backtracking is bounded.
+pub fn compile(pattern: &str, insensitive: bool) -> Result<fancy_regex::Regex, ErrorKind> {
+    fancy_regex::RegexBuilder::new(pattern)
         .case_insensitive(insensitive)
-        .size_limit(1 << 22)
+        .backtrack_limit(1_000_000)
         .build()
         .map_err(|_| ErrorKind::Value)
 }
@@ -65,7 +67,10 @@ pub fn call(ctx: &mut Ctx, name: &str, args: &[Expr]) -> Option<Value> {
             lift(vec![text, pat], move |v| {
                 match (to_text(&v[0]), to_text(&v[1])) {
                     (Ok(t), Ok(p)) => match compile(&p, ci) {
-                        Ok(re) => Value::Bool(re.is_match(&t)),
+                        Ok(re) => re
+                            .is_match(&t)
+                            .map(Value::Bool)
+                            .unwrap_or(Value::Error(ErrorKind::Value)),
                         Err(e) => Value::Error(e),
                     },
                     (Err(e), _) | (_, Err(e)) => Value::Error(e),
@@ -83,24 +88,29 @@ pub fn call(ctx: &mut Ctx, name: &str, args: &[Expr]) -> Option<Value> {
             }
             if mode == 0 {
                 return Some(lift(vec![text], |v| match to_text(&v[0]) {
-                    Ok(t) => re
-                        .find(&t)
-                        .map(|m| Value::text(m.as_str()))
-                        .unwrap_or(Value::Error(ErrorKind::NA)),
+                    Ok(t) => match re.find(&t) {
+                        Ok(Some(m)) => Value::text(m.as_str()),
+                        Ok(None) => Value::Error(ErrorKind::NA),
+                        Err(_) => Value::Error(ErrorKind::Value),
+                    },
                     Err(e) => Value::Error(e),
                 }));
             }
             // modes 1/2 return arrays, so only a single text input is meaningful
             let t = tryv!(to_text(&text));
             if mode == 1 {
-                let all: Vec<Value> = re.find_iter(&t).map(|m| Value::text(m.as_str())).collect();
+                let all: Vec<Value> = re
+                    .find_iter(&t)
+                    .filter_map(|m| m.ok())
+                    .map(|m| Value::text(m.as_str()))
+                    .collect();
                 if all.is_empty() {
                     err(ErrorKind::NA)
                 } else {
                     Value::array(Array::column(all))
                 }
             } else {
-                match re.captures(&t) {
+                match re.captures(&t).ok().flatten() {
                     Some(c) if c.len() > 1 => Value::array(Array::row(
                         (1..c.len())
                             .map(|i| {
@@ -130,7 +140,8 @@ pub fn call(ctx: &mut Ctx, name: &str, args: &[Expr]) -> Option<Value> {
                 if occ == 0 {
                     return Value::text(re.replace_all(&t, rep.as_str()).into_owned());
                 }
-                let caps: Vec<regex::Captures> = re.captures_iter(&t).collect();
+                let caps: Vec<fancy_regex::Captures> =
+                    re.captures_iter(&t).filter_map(|c| c.ok()).collect();
                 let k = if occ > 0 {
                     occ as usize - 1
                 } else {

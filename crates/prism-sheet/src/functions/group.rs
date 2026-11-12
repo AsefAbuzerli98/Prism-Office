@@ -9,7 +9,15 @@ use crate::eval::{compare, truthy, Ctx};
 use crate::parser::Expr;
 use crate::value::{Array, ErrorKind, RangeRef, Value};
 
-pub const NAMES: &[&str] = &["GROUPBY", "PIVOTBY", "PERCENTOF", "TRIMRANGE"];
+pub const NAMES: &[&str] = &[
+    "GROUPBY",
+    "PIVOTBY",
+    "PERCENTOF",
+    "TRIMRANGE",
+    "_TRO_ALL",
+    "_TRO_LEADING",
+    "_TRO_TRAILING",
+];
 
 fn key_of(v: &[Value]) -> String {
     let mut s = String::new();
@@ -496,6 +504,19 @@ pub fn call(ctx: &mut Ctx, name: &str, args: &[Expr]) -> Option<Value> {
             }
         }
         "TRIMRANGE" => trimrange(ctx, args),
+        "_TRO_ALL" | "_TRO_LEADING" | "_TRO_TRAILING" => {
+            let mode = match name {
+                "_TRO_ALL" => 3.0,
+                "_TRO_LEADING" => 1.0,
+                _ => 2.0,
+            };
+            let full = [
+                args.first().cloned().unwrap_or(Expr::Missing),
+                Expr::Number(mode),
+                Expr::Number(mode),
+            ];
+            trimrange(ctx, &full)
+        }
         _ => return None,
     })
 }

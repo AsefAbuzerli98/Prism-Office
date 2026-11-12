@@ -35,7 +35,7 @@ pub const NAMES: &[&str] = &[
 enum Needle {
     Value(Value),
     Wild(regex::Regex),
-    Regex(regex::Regex),
+    Regex(fancy_regex::Regex),
 }
 
 impl Needle {
@@ -46,7 +46,7 @@ impl Needle {
                 .unwrap_or(Needle::Value(v.clone())),
             (3, v) => {
                 let p = to_text(v)?;
-                Needle::Regex(regex::Regex::new(&p).map_err(|_| ErrorKind::Value)?)
+                Needle::Regex(crate::functions::regex_fns::compile(&p, false)?)
             }
             _ => Needle::Value(v.clone()),
         })
@@ -57,7 +57,8 @@ impl Needle {
             Needle::Value(v) => same_kind(v, x) && compare(v, x) == Ordering::Equal,
             Needle::Wild(re) => matches!(x, Value::Text(_)) && re.is_match(&x.to_string()),
             Needle::Regex(re) => {
-                !matches!(x, Value::Empty | Value::Error(_)) && re.is_match(&x.to_string())
+                !matches!(x, Value::Empty | Value::Error(_))
+                    && re.is_match(&x.to_string()).unwrap_or(false)
             }
         }
     }

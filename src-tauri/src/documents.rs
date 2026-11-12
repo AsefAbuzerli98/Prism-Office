@@ -75,14 +75,12 @@ pub struct DocumentRegistry {
     untitled: Mutex<HashMap<DocumentKind, u32>>,
 }
 
-/// "Now" as an Excel serial in local time (offset from the TZ environment is
-/// not available without a timezone database; UTC is used).
+/// "Now" as an Excel serial in the computer's local time zone (TODAY/NOW
+/// cached in saved files match what the user sees).
 pub fn now_serial() -> f64 {
-    let ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as f64)
-        .unwrap_or(0.0);
-    prism_sheet::functions::date::serial_from_unix_ms(ms, 0.0)
+    let now = chrono::Local::now();
+    let offset_min = now.offset().local_minus_utc() as f64 / 60.0;
+    prism_sheet::functions::date::serial_from_unix_ms(now.timestamp_millis() as f64, offset_min)
 }
 
 fn title_from_path(path: &Path) -> String {

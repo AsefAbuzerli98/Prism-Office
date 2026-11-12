@@ -728,5 +728,8 @@ impl Engine {
     /// Function names for autocomplete.
     pub fn function_names() -> Vec<&'static str> {
         crate::functions::function_names()
+            .into_iter()
+            .filter(|n| !n.starts_with('_'))
+            .collect()
     }
 }

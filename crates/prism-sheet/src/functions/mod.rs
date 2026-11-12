@@ -2,6 +2,7 @@
 
 pub mod array;
 pub mod date;
+pub mod finance;
 pub mod group;
 pub mod logic;
 pub mod lookup;
@@ -322,6 +323,7 @@ pub fn call(ctx: &mut Ctx, name: &str, args: &[Expr]) -> Value {
         .or_else(|| math::call(ctx, name, args))
         .or_else(|| text::call(ctx, name, args))
         .or_else(|| date::call(ctx, name, args))
+        .or_else(|| finance::call(ctx, name, args))
         .or_else(|| lookup::call(ctx, name, args))
         .or_else(|| array::call(ctx, name, args))
         .or_else(|| group::call(ctx, name, args))
@@ -345,6 +347,7 @@ pub fn function_names() -> Vec<&'static str> {
         math::NAMES,
         text::NAMES,
         date::NAMES,
+        finance::NAMES,
         lookup::NAMES,
         array::NAMES,
         group::NAMES,

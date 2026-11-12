@@ -1089,6 +1089,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fancy-regex"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e24cb5a94bcae1e5408b0effca5cd7172ea3c5755049c5f3af4cd283a165298"
+dependencies = [
+ "bit-set 0.8.0",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3050,6 +3061,7 @@ name = "prism-office"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "chrono",
  "keyring",
  "prism-openxml",
  "prism-sheet",
@@ -3084,6 +3096,7 @@ name = "prism-sheet"
 version = "0.1.0"
 dependencies = [
  "dlmalloc",
+ "fancy-regex",
  "prism-openxml",
  "quick-xml",
  "rayon",

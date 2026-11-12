@@ -746,8 +746,45 @@ pub fn parse(src: &str, base: CellRef) -> Result<Expr, ParseError> {
     parse_mode(src, base, false)
 }
 
+/// Rewrite trim-range references (`A1:.A10`, `A1.:A10`, `A1.:.A10`) into
+/// the internal `_TRO_TRAILING/_LEADING/_ALL(range)` calls Excel stores.
+fn rewrite_trim_refs(src: &str) -> std::borrow::Cow<'_, str> {
+    if !src.contains(".:") && !src.contains(":.") {
+        return std::borrow::Cow::Borrowed(src);
+    }
+    let re = regex::Regex::new(r#"((?:'(?:[^']|'')+'|[A-Za-z_][A-Za-z0-9_.]*)!)?(\$?[A-Za-z]{1,3}\$?[0-9]+|\$?[A-Za-z]{1,3}|\$?[0-9]+)(\.?):(\.?)(\$?[A-Za-z]{1,3}\$?[0-9]+|\$?[A-Za-z]{1,3}|\$?[0-9]+)"#).expect("static regex");
+    // leave string literals alone
+    let mut out = String::with_capacity(src.len() + 16);
+    for (i, part) in src.split('"').enumerate() {
+        if i > 0 {
+            out.push('"');
+        }
+        if i % 2 == 1 {
+            out.push_str(part);
+            continue;
+        }
+        out.push_str(&re.replace_all(part, |c: &regex::Captures| {
+            let f = match (&c[3], &c[4]) {
+                (".", ".") => "_TRO_ALL",
+                (".", "") => "_TRO_LEADING",
+                ("", ".") => "_TRO_TRAILING",
+                _ => return c[0].to_string(),
+            };
+            format!(
+                "{f}({}{}:{})",
+                c.get(1).map_or("", |m| m.as_str()),
+                &c[2],
+                &c[5]
+            )
+        }));
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 pub fn parse_mode(src: &str, base: CellRef, r1c1: bool) -> Result<Expr, ParseError> {
     let src = src.strip_prefix('=').unwrap_or(src);
+    let rewritten = rewrite_trim_refs(src);
+    let src: &str = &rewritten;
     let toks = Lexer {
         s: src.as_bytes(),
         src,
@@ -846,6 +883,11 @@ pub const FUTURE_FUNCTIONS: &[&str] = &[
     "NETWORKDAYS.INTL",
     "WORKDAY.INTL",
     "MUNIT",
+    "RRI",
+    "PDURATION",
+    "_TRO_ALL",
+    "_TRO_LEADING",
+    "_TRO_TRAILING",
 ];
 
 /// Functions that additionally live in the `_xlws.` namespace.
@@ -1053,6 +1095,23 @@ fn fmt(e: &Expr, o: &WriteOptions, scope: &[String]) -> String {
             };
             // left-associative: right operand needs parens at equal precedence
             format!("{}{}{}", wrap(l, p), sym, wrap(r, p + 1))
+        }
+        Expr::Call(name, args)
+            if !o.file_prefixes
+                && name.starts_with("_TRO_")
+                && args.len() == 1
+                && matches!(args[0], Expr::Ref(_)) =>
+        {
+            let inner = fmt(&args[0], o, scope);
+            let (a, b) = match name.as_str() {
+                "_TRO_ALL" => (".", "."),
+                "_TRO_LEADING" => (".", ""),
+                _ => ("", "."),
+            };
+            match inner.split_once(':') {
+                Some((x, y)) => format!("{x}{a}:{b}{y}"),
+                None => inner,
+            }
         }
         Expr::Call(name, args) => {
             let shown = if o.file_prefixes && FUTURE_FUNCTIONS.contains(&name.as_str()) {

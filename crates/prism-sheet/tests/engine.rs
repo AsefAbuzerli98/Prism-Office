@@ -578,3 +578,143 @@ fn relative_keys() {
     assert_eq!(k("SUM(A:A)", 0, 0), None);
     assert_eq!(k("SUM(1:3)", 0, 0), None);
 }
+
+#[test]
+fn financial_functions_match_excel() {
+    let mut wb = Workbook::new();
+    let close = |v: Value, x: f64, tol: f64| match v {
+        Value::Number(n) => assert!((n - x).abs() <= tol, "{n} vs {x}"),
+        other => panic!("{other:?} vs {x}"),
+    };
+    close(
+        eval(&mut wb, "=PMT(0.05/12,360,200000)"),
+        -1073.643246,
+        1e-5,
+    );
+    close(
+        eval(&mut wb, "=FV(0.06/12,10,-200,-500,1)"),
+        2581.403374,
+        1e-5,
+    );
+    close(eval(&mut wb, "=PV(0.08/12,240,500)"), -59777.14585, 1e-4);
+    close(
+        eval(&mut wb, "=NPER(0.12/12,-100,-1000,10000,1)"),
+        59.6738657,
+        1e-6,
+    );
+    close(eval(&mut wb, "=RATE(48,-200,8000)"), 0.0077014724, 1e-9);
+    close(
+        eval(&mut wb, "=NPV(0.1,-10000,3000,4200,6800)"),
+        1188.443412,
+        1e-5,
+    );
+    close(
+        eval(&mut wb, "=IRR({-70000,12000,15000,18000,21000,26000})"),
+        0.086630948,
+        1e-8,
+    );
+    close(
+        eval(
+            &mut wb,
+            "=XNPV(0.09,{-10000,2750,4250,3250,2750},{39448,39508,39751,39859,39904})",
+        ),
+        2086.647602,
+        1e-4,
+    );
+    close(
+        eval(
+            &mut wb,
+            "=XIRR({-10000,2750,4250,3250,2750},{39448,39508,39751,39859,39904})",
+        ),
+        0.373362535,
+        1e-7,
+    );
+    close(eval(&mut wb, "=IPMT(0.1/12,1,36,8000)"), -66.66666667, 1e-6);
+    close(eval(&mut wb, "=PPMT(0.1/12,1,24,2000)"), -75.62318601, 1e-6);
+    close(
+        eval(&mut wb, "=CUMIPMT(0.09/12,360,125000,13,24,0)"),
+        -11135.23213,
+        1e-4,
+    );
+    close(
+        eval(
+            &mut wb,
+            "=MIRR({-120000,39000,30000,21000,37000,46000},0.1,0.12)",
+        ),
+        0.126094,
+        1e-6,
+    );
+    close(eval(&mut wb, "=SLN(30000,7500,10)"), 2250.0, 1e-9);
+    close(eval(&mut wb, "=SYD(30000,7500,10,1)"), 4090.909091, 1e-5);
+    close(eval(&mut wb, "=DDB(2400,300,10,1)"), 480.0, 1e-9);
+    close(
+        eval(&mut wb, "=DB(1000000,100000,6,1,7)"),
+        186083.3333,
+        1e-3,
+    );
+    close(eval(&mut wb, "=EFFECT(0.0525,4)"), 0.053542667, 1e-8);
+    close(eval(&mut wb, "=NOMINAL(0.053543,4)"), 0.05250032, 1e-7);
+}
+
+#[test]
+fn trim_range_operators() {
+    let mut wb = wb_with(&[("B3", "1"), ("B4", "2"), ("C4", "3")]);
+    assert_eq!(eval(&mut wb, "=ROWS(B1:.B100)"), n(4.0)); // trailing blanks trimmed
+    assert_eq!(eval(&mut wb, "=ROWS(B1.:B100)"), n(98.0)); // leading blanks trimmed
+    assert_eq!(eval(&mut wb, "=ROWS(B1.:.B100)"), n(2.0));
+    assert_eq!(eval(&mut wb, "=SUM(A:.C)"), n(6.0));
+    assert_eq!(eval(&mut wb, "=\"a:.b\""), t("a:.b"));
+    assert_eq!(
+        wb.input_text(0, prism_sheet::CellRef::new(999, 701)),
+        "=\"a:.b\""
+    );
+    wb.set(0, "E1", "=ROWS(B1.:.B100)", NOW).unwrap();
+    assert_eq!(
+        wb.input_text(0, prism_sheet::CellRef::new(0, 4)),
+        "=ROWS(B1.:.B100)"
+    );
+    let e = prism_sheet::parse("ROWS(B1:.B100)", prism_sheet::CellRef::new(0, 0)).unwrap();
+    let file = prism_sheet::parser::to_formula(
+        &e,
+        &prism_sheet::parser::WriteOptions {
+            file_prefixes: true,
+            ..Default::default()
+        },
+    );
+    assert_eq!(file, "ROWS(_xlfn._TRO_TRAILING(B1:B100))");
+    assert_eq!(
+        prism_sheet::parser::to_formula(
+            &prism_sheet::parse(&file, prism_sheet::CellRef::new(0, 0)).unwrap(),
+            &Default::default()
+        ),
+        "ROWS(B1:.B100)"
+    );
+}
+
+#[test]
+fn pcre_features_in_regex_functions() {
+    let mut wb = Workbook::new();
+    // look-ahead / look-behind
+    assert_eq!(
+        eval(
+            &mut wb,
+            "=REGEXEXTRACT(\"price: $42.50\",\"(?<=\\$)\\d+(?=\\.)\")"
+        ),
+        t("42")
+    );
+    // back-reference
+    assert_eq!(
+        eval(&mut wb, "=REGEXTEST(\"hello\",\"(l)\\1\")"),
+        Value::Bool(true)
+    );
+    assert_eq!(
+        eval(&mut wb, "=REGEXREPLACE(\"aa bb cd\",\"(\\w)\\1\",\"<$1>\")"),
+        t("<a> <b> cd")
+    );
+    // negative look-ahead in XLOOKUP regex mode
+    let mut wb = wb_with(&[("A1", "apple"), ("A2", "apricot"), ("B1", "1"), ("B2", "2")]);
+    assert_eq!(
+        eval(&mut wb, "=XLOOKUP(\"^ap(?!p)\",A1:A2,B1:B2,,3)"),
+        n(2.0)
+    );
+}
