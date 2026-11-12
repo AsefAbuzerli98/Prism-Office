@@ -105,6 +105,9 @@ export interface PyStatus {
   interpreter: string | null;
   version: string | null;
   pandas: boolean;
+  matplotlib?: boolean;
+  /** OS confinement of Python cells. */
+  isolation?: "bubblewrap" | "namespaces" | "sandboxExec" | "jobObject" | "none";
 }
 
 /** Mirrors `events::AppEvent`. */
@@ -459,7 +462,7 @@ export class BrowserHost implements HostBridge {
   }
 
   async pythonStatus(): Promise<PyStatus> {
-    return { available: false, interpreter: null, version: null, pandas: false };
+    return { available: false, interpreter: null, version: null, pandas: false, matplotlib: false, isolation: "none" };
   }
 
   pickDataFile() {

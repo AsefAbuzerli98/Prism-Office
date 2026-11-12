@@ -192,10 +192,36 @@ export class SheetEditor implements EngineView {
     if (reqs.length) this.opts.onAsync?.(this, reqs);
   }
 
-  /** Answer an async (=PY) request. */
+  /** Pictures returned by =PY cells (matplotlib figures), by "sheet:r:c". */
+  private images = new Map<string, { img: HTMLImageElement; w: number; h: number }>();
+
+  /** Answer an async (=PY) request; `{image: base64}` shows a picture in the cell. */
   supplyAsync(req: AsyncRequest, value: unknown) {
     if (!this.wb) return;
+    const k = `${req.sheet}:${req.row}:${req.col}`;
+    const pic = value && typeof value === "object" && "image" in value ? (value as { image: string; width?: number; height?: number }) : null;
+    if (pic) {
+      const img = new Image();
+      img.onload = () => this.requestDraw();
+      img.src = `data:image/png;base64,${pic.image}`;
+      const w = pic.width ?? 400;
+      const h = pic.height ?? 300;
+      this.images.set(k, { img, w, h });
+      // make the first picture readable: grow a small cell to a thumbnail
+      const info = this.wb.sheets()[req.sheet];
+      const hasW = info?.colWidths.some(([c]) => c === req.col);
+      const hasH = info?.rowHeights.some(([r]) => r === req.row);
+      if (!hasW) this.wb.setColWidth(req.sheet, req.col, colChars(Math.min(320, w * 0.6)));
+      if (!hasH) this.wb.setRowHeight(req.sheet, req.row, rowPt(Math.min(240, h * 0.6)));
+      value = "Image";
+    } else this.images.delete(k);
     this.changed(this.wb.supplyAsync(req, value));
+  }
+
+  /** Picture shown in a cell, if any (tests / export). */
+  imageAt(sheet: number, r: number, c: number): { w: number; h: number } | null {
+    const p = this.images.get(`${sheet}:${r}:${c}`);
+    return p ? { w: p.w, h: p.h } : null;
   }
 
   private refreshInfo() {
@@ -1602,6 +1628,25 @@ export class SheetEditor implements EngineView {
         ty += lineH;
       }
       ctx.restore();
+    }
+    // pictures from =PY cells, fitted inside the cell
+    for (const [k, pic] of this.images) {
+      const [s, rr, cc] = k.split(":").map(Number) as [number, number, number];
+      if (s !== this.sheet || rr < r0 || rr > r1 || cc < c0 || cc > c1 || !pic.img.complete) continue;
+      const x0 = this.colX(cc);
+      const y0 = this.rowY(rr);
+      const cw = this.cols.sizeOf(cc) - 2;
+      const ch = this.rows.sizeOf(rr) - 2;
+      const scale = Math.min(cw / pic.w, ch / pic.h);
+      const dw = pic.w * scale;
+      const dh = pic.h * scale;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x0 + 1, y0 + 1, cw, ch);
+      try {
+        ctx.drawImage(pic.img, x0 + 1 + (cw - dw) / 2, y0 + 1 + (ch - dh) / 2, dw, dh);
+      } catch {
+        // image not decodable yet
+      }
     }
     // borders
     ctx.strokeStyle = "#111827";

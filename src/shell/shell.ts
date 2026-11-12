@@ -370,7 +370,7 @@ export class Shell {
 
   private async showPythonStatus() {
     const s = await this.host.pythonStatus();
-    this.flash(s.available ? `Python ${s.version ?? ""} (${s.interpreter}) · pandas: ${s.pandas ? "yes" : "no"}` : t("sheet.noPython", {}, "Python 3 was not found — install it or set PRISM_PYTHON"), !s.available);
+    this.flash(s.available ? `Python ${s.version ?? ""} (${s.interpreter}) · pandas: ${s.pandas ? "yes" : "no"} · matplotlib: ${s.matplotlib ? "yes" : "no"} · sandbox: ${s.isolation ?? "none"}` : t("sheet.noPython", {}, "Python 3 was not found — install it or set PRISM_PYTHON"), !s.available);
   }
 
   private registerWordCommands() {

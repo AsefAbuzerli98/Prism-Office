@@ -25,6 +25,165 @@ pub struct PyStatus {
     pub interpreter: Option<String>,
     pub version: Option<String>,
     pub pandas: bool,
+    pub matplotlib: bool,
+    pub isolation: Isolation,
+}
+
+/// OS-level confinement used for Python cells, strongest available first.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Isolation {
+    /// Linux bubblewrap: no network, read-only filesystem, private /tmp and $HOME.
+    Bubblewrap,
+    /// Linux user + network namespaces (`unshare -rn`): no network.
+    Namespaces,
+    /// macOS Seatbelt profile: no network, writes only to the scratch folder.
+    SandboxExec,
+    /// Windows Job Object: memory cap, no child processes, killed with the job.
+    JobObject,
+    /// Only the in-process guards of the runner.
+    None,
+}
+
+fn works(cmd: &str, args: &[&str]) -> bool {
+    Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+/// Detected once; `PRISM_PY_SANDBOX=off` disables OS confinement.
+pub fn isolation() -> Isolation {
+    static ISO: std::sync::OnceLock<Isolation> = std::sync::OnceLock::new();
+    *ISO.get_or_init(|| {
+        if std::env::var("PRISM_PY_SANDBOX").is_ok_and(|v| v == "off") {
+            return Isolation::None;
+        }
+        if cfg!(target_os = "linux") {
+            if works(
+                "bwrap",
+                &[
+                    "--ro-bind",
+                    "/",
+                    "/",
+                    "--dev",
+                    "/dev",
+                    "--unshare-all",
+                    "--die-with-parent",
+                    "true",
+                ],
+            ) {
+                return Isolation::Bubblewrap;
+            }
+            if works("unshare", &["-rn", "true"]) {
+                return Isolation::Namespaces;
+            }
+            return Isolation::None;
+        }
+        if cfg!(target_os = "macos") {
+            return if std::path::Path::new("/usr/bin/sandbox-exec").exists() {
+                Isolation::SandboxExec
+            } else {
+                Isolation::None
+            };
+        }
+        if cfg!(windows) {
+            return Isolation::JobObject;
+        }
+        Isolation::None
+    })
+}
+
+/// The command that runs `python -I script` under the chosen confinement.
+fn confined(py: &str, script: &std::path::Path, dir: &std::path::Path, iso: Isolation) -> Command {
+    match iso {
+        Isolation::Bubblewrap => {
+            let mut c = Command::new("bwrap");
+            c.args([
+                "--ro-bind",
+                "/",
+                "/",
+                "--dev",
+                "/dev",
+                "--proc",
+                "/proc",
+                "--tmpfs",
+                "/tmp",
+            ]);
+            if let Some(home) =
+                std::env::var_os("HOME").filter(|h| std::path::Path::new(h).is_dir())
+            {
+                c.arg("--tmpfs").arg(home);
+            }
+            c.arg("--bind").arg(dir).arg(dir).arg("--chdir").arg(dir);
+            c.args(["--unshare-all", "--die-with-parent", "--new-session", "--"]);
+            c.arg(py).arg("-I").arg(script);
+            c
+        }
+        Isolation::Namespaces => {
+            let mut c = Command::new("unshare");
+            c.arg("-rn").arg(py).arg("-I").arg(script);
+            c
+        }
+        Isolation::SandboxExec => {
+            let d = dir.to_string_lossy().replace('"', "");
+            let profile = format!(
+                r#"(version 1)(allow default)(deny network*)(allow network* (local unix))(deny file-write*)(allow file-write* (subpath "{d}") (subpath "/private{d}") (literal "/dev/null") (subpath "/dev/fd"))"#
+            );
+            let mut c = Command::new("/usr/bin/sandbox-exec");
+            c.arg("-p").arg(profile).arg(py).arg("-I").arg(script);
+            c
+        }
+        _ => {
+            let mut c = Command::new(py);
+            c.arg("-I").arg(script);
+            c
+        }
+    }
+}
+
+/// Windows: put the process in a Job Object (1 GB memory cap, no child
+/// processes, killed when the handle closes).
+#[cfg(windows)]
+struct Job(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl Drop for Job {
+    fn drop(&mut self) {
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
+    }
+}
+
+#[cfg(windows)]
+fn confine_job(child: &std::process::Child) -> Option<Job> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::JobObjects::*;
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return None;
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            | JOB_OBJECT_LIMIT_PROCESS_MEMORY
+            | JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+        info.BasicLimitInformation.ActiveProcessLimit = 1;
+        info.ProcessMemoryLimit = 1024 * 1024 * 1024;
+        let ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const core::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if ok == 0 || AssignProcessToJobObject(job, child.as_raw_handle() as _) == 0 {
+            windows_sys::Win32::Foundation::CloseHandle(job);
+            return None;
+        }
+        Some(Job(job))
+    }
 }
 
 /// Interpreter to use: `PRISM_PYTHON`, else `python3`, else `python`.
@@ -51,9 +210,11 @@ pub fn status() -> PyStatus {
             interpreter: None,
             version: None,
             pandas: false,
+            matplotlib: false,
+            isolation: isolation(),
         };
     };
-    let out = Command::new(&py).args(["-I", "-c", "import sys,importlib.util as u;print(sys.version.split()[0]);print(bool(u.find_spec('pandas')))"]).output().ok();
+    let out = Command::new(&py).args(["-I", "-c", "import sys,importlib.util as u;print(sys.version.split()[0]);print(bool(u.find_spec('pandas')));print(bool(u.find_spec('matplotlib')))"]).output().ok();
     let text = out
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default();
@@ -62,6 +223,8 @@ pub fn status() -> PyStatus {
         available: true,
         version: lines.next().map(String::from),
         pandas: lines.next() == Some("True"),
+        matplotlib: lines.next() == Some("True"),
+        isolation: isolation(),
         interpreter: Some(py),
     }
 }
@@ -84,10 +247,9 @@ pub fn run(
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let script = dir.join("runner.py");
     std::fs::write(&script, RUNNER).map_err(|e| e.to_string())?;
-    let mut cmd = Command::new(py);
-    cmd.arg("-I")
-        .arg(&script)
-        .current_dir(&dir)
+    let iso = isolation();
+    let mut cmd = confined(&py, &script, &dir, iso);
+    cmd.current_dir(&dir)
         .env_clear()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -113,6 +275,8 @@ pub fn run(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("could not start Python: {e}"))?;
+    #[cfg(windows)]
+    let _job = confine_job(&child);
     let req = serde_json::json!({ "code": code, "inputs": inputs, "returnType": return_type, "memoryMb": 1024, "cpuSeconds": timeout.as_secs().max(1) });
     child
         .stdin
@@ -322,6 +486,54 @@ mod tests {
         let r = run("while True: pass", &none, 0, Duration::from_secs(2)).unwrap();
         // killed by the CPU limit or the wall-clock timeout
         assert!(r.error.is_some());
+        println!("isolation: {:?}", isolation());
+        // with OS isolation even a direct syscall-level connect is impossible
+        if matches!(isolation(), Isolation::Bubblewrap | Isolation::Namespaces) {
+            let code =
+                "import _socket\ns = _socket.socket()\ns.settimeout(2)\ns.connect(('1.1.1.1', 80))";
+            let r = run(code, &none, 0, Duration::from_secs(20)).unwrap();
+            assert!(
+                r.error.unwrap().contains("unreachable"),
+                "network must be unreachable"
+            );
+        }
+        if isolation() == Isolation::Bubblewrap {
+            let r = run(
+                "import _io\n_io.open('/etc/prism-test', 'w')",
+                &none,
+                0,
+                Duration::from_secs(20),
+            )
+            .unwrap();
+            assert!(r.error.unwrap().contains("Read-only"));
+            let home = std::env::var("HOME").unwrap_or_default();
+            let r = run(
+                &format!("import os\nlen(os.listdir({home:?}))"),
+                &none,
+                0,
+                Duration::from_secs(20),
+            )
+            .unwrap();
+            assert_eq!(r.value, serde_json::json!(0), "home is hidden");
+        }
+        let r = run("1/0", &none, 0, Duration::from_secs(20)).unwrap();
+        assert_eq!(
+            r.error.as_deref(),
+            Some("ZeroDivisionError: division by zero")
+        );
+        if status().matplotlib {
+            let r = run(
+                "import matplotlib.pyplot as plt\nplt.plot([1, 3, 2])",
+                &none,
+                0,
+                Duration::from_secs(60),
+            )
+            .unwrap();
+            assert_eq!(r.error, None);
+            let png = r.value["image"].as_str().unwrap();
+            assert!(png.starts_with("iVBORw0KGgo"), "PNG data");
+            assert!(r.value["width"].as_u64().unwrap() > 100);
+        }
         let r = run("1/0", &none, 0, Duration::from_secs(20)).unwrap();
         assert_eq!(
             r.error.as_deref(),

@@ -245,3 +245,18 @@ describe("classic PivotTables", () => {
     expect(ed.wb!.charts(s)[0]!.chart.kind).toBe("pie");
   });
 });
+
+describe("=PY pictures", () => {
+  it("shows a matplotlib figure in the cell", async () => {
+    const onAsync = vi.fn();
+    const host = { updateSheetModel: vi.fn(async () => {}) } as unknown as HostBridge;
+    const ed = new SheetEditor(host, 1, { workbook: new Workbook(), onAsync });
+    await ed.ready;
+    ed.applyEdits([{ sheet: 0, r: 2, c: 1, text: '=PY("import matplotlib.pyplot as plt\nplt.plot([1,2])",0)' }]);
+    const [, reqs] = onAsync.mock.calls.at(-1)!;
+    ed.supplyAsync(reqs[0], { image: "iVBORw0KGgo=", width: 400, height: 300 });
+    expect(shown(ed, 2, 1)).toBe("Image");
+    expect(ed.imageAt(0, 2, 1)).toEqual({ w: 400, h: 300 });
+    expect(ed.wb!.sheets()[0]!.rowHeights.length).toBe(1);
+  });
+});

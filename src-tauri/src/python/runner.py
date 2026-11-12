@@ -4,7 +4,11 @@ result on stdout. Runs under `python3 -I` in a throw-away directory.
 The sandbox is best-effort (no OS isolation): resource limits, no network
 sockets, no subprocesses, and file writes only inside the working dir.
 """
-import ast, builtins, io, json, math, os, sys
+import ast, base64, builtins, io, json, math, os, sys
+
+# matplotlib renders off-screen and keeps its cache in the scratch folder
+os.environ["MPLBACKEND"] = "Agg"
+os.environ["MPLCONFIGDIR"] = os.getcwd()
 
 req = json.loads(sys.stdin.read())
 real_stdout = sys.stdout
@@ -119,6 +123,30 @@ def to_scalar(x):
     return str(x)
 
 
+def as_image(v):
+    """A matplotlib Figure/Axes/Artist result (or an open figure) as PNG."""
+    if "matplotlib" not in sys.modules:
+        return None
+    from matplotlib.figure import Figure
+    import matplotlib.pyplot as plt
+    fig = None
+    if isinstance(v, Figure):
+        fig = v
+    elif hasattr(v, "get_figure") and callable(v.get_figure):
+        fig = v.get_figure()
+    elif isinstance(v, (list, tuple)) and v and hasattr(v[0], "get_figure"):
+        fig = v[0].get_figure()
+    elif v is None and plt.get_fignums():
+        fig = plt.gcf()
+    if fig is None:
+        return None
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+    w, h = fig.get_size_inches() * 100
+    plt.close("all")
+    return {"image": base64.b64encode(buf.getvalue()).decode(), "width": int(w), "height": int(h)}
+
+
 out = io.StringIO()
 result = {"value": None, "stdout": "", "error": None}
 try:
@@ -135,7 +163,8 @@ try:
     exec(compile(tree, "<cell>", "exec"), env)
     value = eval(compile(last, "<cell>", "eval"), env) if last else None
     sys.stdout = real_stdout
-    result["value"] = to_json(value, int(req.get("returnType", 0)) == 1)
+    image = as_image(value)
+    result["value"] = image if image is not None else to_json(value, int(req.get("returnType", 0)) == 1)
 except BaseException as e:  # noqa: BLE001
     sys.stdout = real_stdout
     result["error"] = f"{type(e).__name__}: {e}"
