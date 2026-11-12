@@ -183,3 +183,28 @@ describe("Shell", () => {
     expect(root.querySelector(".toast.error")?.textContent).toMatch(/desktop app/);
   });
 });
+
+describe("auto-recovery in the Hub", () => {
+  it("offers, restores and discards recovered documents", async () => {
+    localStorage.clear();
+    document.body.innerHTML = "";
+    const root = document.createElement("div");
+    document.body.append(root);
+    const host = new BrowserHost(localStorage, () => null);
+    host.recoverable = [
+      { key: "k1", title: "Plan.docx", path: "/d/Plan.docx", kind: "document", updated: Date.now(), entries: 4 },
+      { key: "k2", title: "Budget.xlsx", path: null, kind: "workbook", updated: Date.now() - 1000, entries: 1 },
+    ];
+    const shell = new Shell(root, host, new CommandRegistry(false));
+    await shell.init();
+    expect(root.querySelectorAll(".recovery-panel li")).toHaveLength(2);
+    (root.querySelector('.recovery-panel li[data-key="k2"] .link') as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(root.querySelectorAll(".recovery-panel li")).toHaveLength(1);
+    await shell.restoreRecovered("k1");
+    expect(shell.tabs.active).toMatchObject({ title: "Plan.docx (recovered)", dirty: true });
+    shell.goHub();
+    expect(root.querySelector(".recovery-panel")).toBeNull();
+    shell.dispose();
+  });
+});

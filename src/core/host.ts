@@ -51,6 +51,16 @@ export type ServiceState =
 
 export type ServiceInfo = { id: string; name: string } & ServiceState;
 
+export interface RecoverableDoc {
+  key: string;
+  title: string;
+  path: string | null;
+  kind: Mode;
+  /** Unix ms of the last journaled change. */
+  updated: number;
+  entries: number;
+}
+
 export interface AiStatus {
   configured: boolean;
   keySource: "keychain" | "file" | "environment" | "none";
@@ -119,6 +129,11 @@ export interface HostBridge {
   getWordFonts(id: number): Promise<{ name: string; style: string; data: string }[]>;
   /** Let the user choose a picture file; resolves to base64 bytes or null. */
   pickImage(): Promise<string | null>;
+
+  /** Documents with unsaved work journaled by an earlier session. */
+  listRecoverable(): Promise<RecoverableDoc[]>;
+  restoreRecovered(key: string): Promise<DocumentInfo>;
+  discardRecovered(key: string): Promise<void>;
 
   aiStatus(): Promise<AiStatus>;
   setAiConfig(cfg: { apiKey?: string; model?: string; effort?: string; enabled?: boolean }): Promise<AiStatus>;
@@ -211,6 +226,15 @@ export class TauriHost implements HostBridge {
   }
   getWordFonts(id: number) {
     return this.api.invoke<{ name: string; style: string; data: string }[]>("get_word_fonts", { id });
+  }
+  listRecoverable() {
+    return this.api.invoke<RecoverableDoc[]>("list_recoverable");
+  }
+  restoreRecovered(key: string) {
+    return this.api.invoke<DocumentInfo>("restore_recovered", { key });
+  }
+  discardRecovered(key: string) {
+    return this.api.invoke<void>("discard_recovered", { key });
   }
   aiStatus() {
     return this.api.invoke<AiStatus>("ai_status");
@@ -389,6 +413,20 @@ export class BrowserHost implements HostBridge {
   }
   async getWordFonts() {
     return [];
+  }
+  /** Recovery journals (tests / browser preview keep them in memory). */
+  recoverable: RecoverableDoc[] = [];
+  async listRecoverable() {
+    return [...this.recoverable];
+  }
+  async restoreRecovered(key: string) {
+    const r = this.recoverable.find((x) => x.key === key);
+    if (!r) throw new Error("recovery journal not found");
+    this.recoverable = this.recoverable.filter((x) => x.key !== key);
+    return this.store({ kind: r.kind, title: `${r.title} (recovered)`, path: null });
+  }
+  async discardRecovered(key: string) {
+    this.recoverable = this.recoverable.filter((x) => x.key !== key);
   }
   /** Test hook / dev stub for AI calls in the browser preview. */
   aiHandler: ((req: AiRequest, onDelta?: (t: string) => void) => Promise<AiResponse>) | null = null;

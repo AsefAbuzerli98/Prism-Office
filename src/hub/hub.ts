@@ -1,5 +1,5 @@
 import { h } from "../core/dom";
-import type { RecentFile } from "../core/host";
+import type { RecentFile, RecoverableDoc } from "../core/host";
 import { t } from "../core/i18n";
 import { MODES, MODE_ORDER, type Mode } from "../core/modes";
 
@@ -10,10 +10,35 @@ export interface HubActions {
   onRemoveRecent(path: string): void;
   onClearRecent(): void;
   onSettings(): void;
+  onRestore?(key: string): void;
+  onDiscardRecovered?(key: string): void;
 }
 
 /** The Application Hub: modality gateway shown on launch and on "+" tab. */
-export function renderHub(actions: HubActions, recents: RecentFile[]): HTMLElement {
+export function renderHub(actions: HubActions, recents: RecentFile[], recoverable: RecoverableDoc[] = []): HTMLElement {
+  const recovery = recoverable.length
+    ? h(
+        "section",
+        { class: "hub-panel recovery-panel", "aria-label": t("hub.recovered") },
+        h("h2", {}, t("hub.recovered")),
+        h("p", { class: "muted small" }, t("hub.recoveredHint")),
+        h(
+          "ul",
+          { class: "recent-list" },
+          ...recoverable.map((r) =>
+            h(
+              "li",
+              { class: "recent-row", dataset: { key: r.key } },
+              h("span", { class: "recent-dot", style: `background:${MODES[r.kind].accent.base}` }),
+              h("span", { class: "recent-name" }, r.title),
+              h("span", { class: "recent-path" }, new Date(r.updated).toLocaleString()),
+              h("button", { class: "btn btn-quiet", onclick: () => actions.onRestore?.(r.key) }, t("hub.restore")),
+              h("button", { class: "link", onclick: () => actions.onDiscardRecovered?.(r.key) }, t("hub.discard")),
+            ),
+          ),
+        ),
+      )
+    : null;
   const cards = MODE_ORDER.map((m) => {
     const info = MODES[m];
     const label = t(`mode.${m}`);
@@ -93,6 +118,7 @@ export function renderHub(actions: HubActions, recents: RecentFile[]): HTMLEleme
       h("div", {}, h("h1", {}, t("app.name")), h("p", { class: "muted" }, t("hub.subtitle"))),
       h("button", { class: "btn btn-quiet hub-settings", onclick: () => actions.onSettings() }, `⚙ ${t("hub.settings")}`),
     ),
+    recovery,
     h("div", { class: "mode-grid" }, ...cards),
     h(
       "div",

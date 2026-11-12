@@ -52,6 +52,10 @@ struct OpenDocument {
     word: Option<prism_word::WordDocument>,
     /// The model has changes not yet written into `package`.
     word_dirty: bool,
+    /// Auto-recovery journal key, edit revision and last journaled revision.
+    recovery_key: String,
+    revision: u64,
+    journaled: u64,
 }
 
 #[derive(Default)]
@@ -68,8 +72,9 @@ fn title_from_path(path: &Path) -> String {
 }
 
 impl DocumentRegistry {
-    fn insert(&self, doc: OpenDocument) -> DocumentInfo {
+    fn insert(&self, mut doc: OpenDocument) -> DocumentInfo {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed) + 1;
+        doc.recovery_key = crate::recovery::RecoveryStore::key_for(id);
         let info = Self::info(id, &doc);
         self.docs.lock().unwrap().insert(id, doc);
         info
@@ -105,6 +110,9 @@ impl DocumentRegistry {
             package: templates::blank(kind),
             word: None,
             word_dirty: false,
+            recovery_key: String::new(),
+            revision: 0,
+            journaled: 0,
         })
     }
 
@@ -118,6 +126,9 @@ impl DocumentRegistry {
             package,
             word: None,
             word_dirty: false,
+            recovery_key: String::new(),
+            revision: 0,
+            journaled: 0,
         }))
     }
 
@@ -196,7 +207,86 @@ impl DocumentRegistry {
         content.default_para = base.default_para;
         doc.word = Some(content);
         doc.word_dirty = true;
+        doc.revision += 1;
         Ok(())
+    }
+
+    /// Journal every document edited since the last tick (auto-recovery).
+    pub fn journal_changes(&self, store: &crate::recovery::RecoveryStore) -> usize {
+        let mut docs = self.docs.lock().unwrap();
+        let mut n = 0;
+        for doc in docs.values_mut() {
+            if doc.revision == doc.journaled {
+                continue;
+            }
+            let Some(w) = &doc.word else { continue };
+            let Ok(content) = serde_json::to_value(w) else {
+                continue;
+            };
+            let meta = crate::recovery::RecoveryMeta {
+                title: doc.title.clone(),
+                path: doc.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+                kind: doc.kind,
+                updated: 0,
+            };
+            if store.record(&doc.recovery_key, &meta, &content).is_ok() {
+                doc.journaled = doc.revision;
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// The journal key of a document (to discard it after save/close).
+    pub fn recovery_key(&self, id: u64) -> Option<String> {
+        self.docs
+            .lock()
+            .unwrap()
+            .get(&id)
+            .map(|d| d.recovery_key.clone())
+    }
+
+    /// Mark a document's content as journaled-and-clean (after a save).
+    pub fn mark_saved(&self, id: u64) {
+        if let Some(d) = self.docs.lock().unwrap().get_mut(&id) {
+            d.journaled = d.revision;
+        }
+    }
+
+    /// Re-open a document from a recovery journal; it comes back modified.
+    pub fn restore(
+        &self,
+        store: &crate::recovery::RecoveryStore,
+        key: &str,
+    ) -> Result<DocumentInfo, DocError> {
+        let (meta, content) = store
+            .restore(key)
+            .map_err(|e| DocError::OpenXml(prism_openxml::Error::Io(e)))?;
+        let original = meta.path.as_ref().map(PathBuf::from).filter(|p| p.exists());
+        let info = match &original {
+            Some(p) => self.open(p)?,
+            None => self.create(meta.kind),
+        };
+        if meta.kind == DocumentKind::Document {
+            let word: prism_word::WordDocument = serde_json::from_value(content).map_err(|e| {
+                DocError::OpenXml(prism_openxml::Error::Xml {
+                    part: "recovery".into(),
+                    message: e.to_string(),
+                })
+            })?;
+            self.set_word(info.id, word)?;
+        }
+        {
+            let mut docs = self.docs.lock().unwrap();
+            if let Some(d) = docs.get_mut(&info.id) {
+                d.title = format!("{} (recovered)", meta.title);
+                if original.is_none() {
+                    d.path = None;
+                }
+            }
+        }
+        store.discard(key);
+        self.get(info.id)
     }
 
     fn with_word_package<T>(
@@ -252,6 +342,42 @@ impl DocumentRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_recovery_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::recovery::RecoveryStore::new(dir.path().to_path_buf());
+        let reg = DocumentRegistry::default();
+        let d = reg.create(DocumentKind::Document);
+        assert_eq!(reg.journal_changes(&store), 0, "nothing edited yet");
+        let mut w = reg.word(d.id).unwrap();
+        w.blocks = vec![prism_word::Block::Paragraph(prism_word::Paragraph::plain(
+            "unsaved work",
+        ))];
+        reg.set_word(d.id, w.clone()).unwrap();
+        assert_eq!(reg.journal_changes(&store), 1);
+        assert_eq!(reg.journal_changes(&store), 0, "no change since last tick");
+        w.blocks
+            .push(prism_word::Block::Paragraph(prism_word::Paragraph::plain(
+                "more",
+            )));
+        reg.set_word(d.id, w).unwrap();
+        reg.journal_changes(&store);
+
+        // "crash": a new process with a new registry finds and restores the journal
+        let store2 = crate::recovery::RecoveryStore::new(dir.path().to_path_buf());
+        let found = store2.list();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].meta.title, "Document 1");
+        let reg2 = DocumentRegistry::default();
+        let info = reg2.restore(&store2, &found[0].key).unwrap();
+        assert_eq!(info.title, "Document 1 (recovered)");
+        assert_eq!(
+            reg2.word(info.id).unwrap().plain_text(),
+            "unsaved work\nmore"
+        );
+        assert!(store2.list().is_empty(), "restored journal is consumed");
+    }
 
     #[test]
     fn word_model_edit_and_save() {

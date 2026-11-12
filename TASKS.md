@@ -106,8 +106,8 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 
 ## Cross-cutting
 
-- [ ] **X-01** Local-first auto-recovery: differential transaction journal every 3 s, crash restore.
-- [~] **X-02** AI service daemon: Claude Messages API with streaming, refusal fallbacks, key kept in the native host (env or 0600 file). Pending: OS keychain storage, rate-limit/backoff handling, provider abstraction.
+- [x] **X-01** Local-first auto-recovery: structural JSON-diff journal (splice ops, fsync) every 3 s per modified document, compaction, torn-write tolerance, Hub restore/discard; journals dropped on save or deliberate close.
+- [x] **X-02** AI service daemon: provider trait (Claude Messages API), streaming, refusal fallbacks, retries with retry-after/exponential backoff, key in the OS keychain (0600 file fallback), privacy switch.
 - [ ] **X-03** Telemetry-free crash reporting (opt-in), structured logging.
 - [ ] **X-04** OpenXML conformance corpus tests (Microsoft 365, Google Workspace, iWork exports).
 

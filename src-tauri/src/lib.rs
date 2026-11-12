@@ -9,6 +9,7 @@ pub mod documents;
 pub mod events;
 pub mod launch;
 pub mod recent;
+pub mod recovery;
 pub mod services;
 pub mod settings;
 mod store;
@@ -83,11 +84,17 @@ fn get_document(id: u64, docs: State<'_, DocumentRegistry>) -> Result<DocumentIn
 fn save_document(
     id: u64,
     path: Option<PathBuf>,
+    app: AppHandle,
     docs: State<'_, DocumentRegistry>,
     recent: State<'_, RecentStore>,
     bus: State<'_, EventBus>,
 ) -> Result<DocumentInfo, DocError> {
     let info = docs.save(id, path.as_deref())?;
+    // Saved to disk: the recovery journal is no longer needed.
+    if let Some(key) = docs.recovery_key(id) {
+        app.state::<recovery::RecoveryStore>().discard(&key);
+    }
+    docs.mark_saved(id);
     if let Some(p) = &info.path {
         recent.touch(std::path::Path::new(p), info.kind);
         bus.publish(AppEvent::RecentChanged);
@@ -101,7 +108,12 @@ fn close_document(
     id: u64,
     docs: State<'_, DocumentRegistry>,
     bus: State<'_, EventBus>,
+    recovery: State<'_, recovery::RecoveryStore>,
 ) -> Result<(), DocError> {
+    // Closing is deliberate (the UI confirms unsaved changes): drop the journal.
+    if let Some(key) = docs.recovery_key(id) {
+        recovery.discard(&key);
+    }
     docs.close(id)?;
     bus.publish(AppEvent::DocumentClosed { id });
     Ok(())
@@ -196,6 +208,30 @@ fn get_word_fonts(id: u64, docs: State<'_, DocumentRegistry>) -> Result<Vec<Font
             data: b64().encode(f.data),
         })
         .collect())
+}
+
+// ---- auto-recovery ----------------------------------------------------------------
+
+#[tauri::command]
+fn list_recoverable(recovery: State<'_, recovery::RecoveryStore>) -> Vec<recovery::RecoverableDoc> {
+    recovery.list()
+}
+
+#[tauri::command]
+fn restore_recovered(
+    key: String,
+    docs: State<'_, DocumentRegistry>,
+    recovery: State<'_, recovery::RecoveryStore>,
+    bus: State<'_, EventBus>,
+) -> Result<DocumentInfo, DocError> {
+    let info = docs.restore(&recovery, &key)?;
+    bus.publish(AppEvent::DocumentOpened { info: info.clone() });
+    Ok(info)
+}
+
+#[tauri::command]
+fn discard_recovered(key: String, recovery: State<'_, recovery::RecoveryStore>) {
+    recovery.discard(&key);
 }
 
 // ---- AI ------------------------------------------------------------------------
@@ -343,6 +379,7 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let data_dir = app.path().app_data_dir().ok();
+            let data_dir_for_recovery = data_dir.clone();
             let config_dir = app.path().app_config_dir().ok();
             app.manage(RecentStore::load(
                 data_dir.map(|d| d.join("recent.json")),
@@ -351,6 +388,24 @@ pub fn run() {
             app.manage(SettingsStore::load(
                 config_dir.clone().map(|d| d.join("settings.json")),
             ));
+            let recovery_root = data_dir_for_recovery.map(|d| d.join("recovery"));
+            app.manage(recovery::RecoveryStore::new(
+                recovery_root
+                    .clone()
+                    .unwrap_or_else(|| std::env::temp_dir().join("prism-recovery")),
+            ));
+            {
+                // Journal edits every few seconds on a background thread.
+                let h = handle.clone();
+                std::thread::Builder::new()
+                    .name("prism-recovery".into())
+                    .spawn(move || loop {
+                        std::thread::sleep(std::time::Duration::from_secs(recovery::INTERVAL_SECS));
+                        h.state::<DocumentRegistry>()
+                            .journal_changes(&h.state::<recovery::RecoveryStore>());
+                    })
+                    .ok();
+            }
             let ai_store = ai::AiStore::load(config_dir.map(|d| d.join("ai.json")));
             let ai_configured = ai_store.status().configured;
             app.manage(ai_store);
@@ -408,6 +463,9 @@ pub fn run() {
             get_settings,
             set_settings,
             list_services,
+            list_recoverable,
+            restore_recovered,
+            discard_recovered,
             ai_status,
             set_ai_config,
             ai_complete

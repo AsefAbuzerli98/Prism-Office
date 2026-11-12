@@ -1,6 +1,6 @@
 import { CommandRegistry } from "../core/commands";
 import { h } from "../core/dom";
-import { DEFAULT_SETTINGS, type AppEvent, type DocumentInfo, type HostBridge, type RecentFile, type ServiceInfo, type Settings } from "../core/host";
+import { DEFAULT_SETTINGS, type RecoverableDoc, type AppEvent, type DocumentInfo, type HostBridge, type RecentFile, type ServiceInfo, type Settings } from "../core/host";
 import { onLocaleChange, setLocale, t } from "../core/i18n";
 import { MODES, MODE_ORDER, type Mode } from "../core/modes";
 import { RIBBONS } from "../core/ribbons";
@@ -35,6 +35,7 @@ export class Shell {
   private showHub = true;
   private settings: Settings = { ...DEFAULT_SETTINGS };
   private recents: RecentFile[] = [];
+  private recoverable: RecoverableDoc[] = [];
   private services: ServiceInfo[] = [];
   /** Dedicated document window (multi-instance) rather than the main window. */
   readonly isDocumentWindow: boolean;
@@ -96,11 +97,13 @@ export class Shell {
 
   /** Load settings, recents and services; adopt this window's document or pending OS opens. */
   async init() {
-    const [settings, recents, services] = await Promise.all([
+    const [settings, recents, services, recoverable] = await Promise.all([
       this.host.getSettings(),
       this.host.recentFiles(),
       this.host.listServices(),
+      this.host.listRecoverable().catch(() => [] as RecoverableDoc[]),
     ]);
+    this.recoverable = recoverable;
     this.applySettings(settings);
     this.recents = recents;
     this.services = services;
@@ -181,6 +184,15 @@ export class Shell {
     await this.guard(async () => {
       await this.host.openDocumentWindow(docId);
       this.tabs.close(docId);
+    });
+  }
+
+  async restoreRecovered(key: string) {
+    await this.guard(async () => {
+      const info = await this.host.restoreRecovered(key);
+      this.recoverable = this.recoverable.filter((r) => r.key !== key);
+      this.adopt(info);
+      this.tabs.update(info.id, { dirty: true });
     });
   }
 
@@ -616,8 +628,16 @@ export class Shell {
             onRemoveRecent: (p) => void this.host.removeRecent(p),
             onClearRecent: () => void this.host.clearRecent(),
             onSettings: () => void this.showSettings(),
+            onRestore: (key) => void this.restoreRecovered(key),
+            onDiscardRecovered: (key) =>
+              void this.guard(async () => {
+                await this.host.discardRecovered(key);
+                this.recoverable = this.recoverable.filter((r) => r.key !== key);
+                this.render();
+              }),
           },
           this.recents,
+          this.recoverable,
         ),
       );
       return;
