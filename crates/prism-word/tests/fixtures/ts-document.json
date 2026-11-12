@@ -68,9 +68,122 @@
       "indentFirst": -360
     },
     {
-      "type": "opaque",
-      "label": "Table",
-      "xml": "<w:tbl xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl>"
+      "type": "table",
+      "grid": [
+        4513,
+        4513
+      ],
+      "borders": true,
+      "rows": [
+        {
+          "cells": [
+            {
+              "blocks": [
+                {
+                  "type": "paragraph",
+                  "inlines": []
+                }
+              ],
+              "span": 1,
+              "shading": "DDEEFF"
+            },
+            {
+              "blocks": [
+                {
+                  "type": "paragraph",
+                  "inlines": []
+                }
+              ],
+              "span": 1
+            }
+          ],
+          "header": true
+        },
+        {
+          "cells": [
+            {
+              "blocks": [
+                {
+                  "type": "paragraph",
+                  "inlines": []
+                }
+              ],
+              "span": 1
+            },
+            {
+              "blocks": [
+                {
+                  "type": "paragraph",
+                  "inlines": [
+                    {
+                      "type": "text",
+                      "text": "cell",
+                      "marks": {
+                        "revision": {
+                          "kind": "insert",
+                          "id": "1",
+                          "author": "Prism",
+                          "date": "2026-11-12T00:00:00Z"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "span": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "paragraph",
+      "bidi": true,
+      "tabs": [
+        {
+          "pos": 9016,
+          "align": "right",
+          "leader": "."
+        }
+      ],
+      "inlines": [
+        {
+          "type": "comment",
+          "id": "0",
+          "edge": "start"
+        },
+        {
+          "type": "text",
+          "text": "noted",
+          "marks": {
+            "rtl": true
+          }
+        },
+        {
+          "type": "comment",
+          "id": "0",
+          "edge": "end"
+        },
+        {
+          "type": "comment",
+          "id": "0",
+          "edge": "reference"
+        },
+        {
+          "type": "note",
+          "kind": "footnote",
+          "id": 1,
+          "xml": ""
+        },
+        {
+          "type": "shape",
+          "preset": "ellipse",
+          "cx": 914400,
+          "cy": 457200,
+          "stroke": "1F2937",
+          "xml": ""
+        }
+      ]
     }
   ],
   "section": {
@@ -82,7 +195,12 @@
     "marginLeft": 1440,
     "marginHeader": 708,
     "marginFooter": 708,
-    "landscape": true
+    "landscape": true,
+    "columns": {
+      "count": 2,
+      "space": 720,
+      "separator": true
+    }
   },
   "styles": [
     {
@@ -210,6 +328,88 @@
         "font": "Consolas",
         "size": 20
       }
+    },
+    {
+      "id": "FootnoteText",
+      "name": "footnote text",
+      "kind": "paragraph",
+      "basedOn": "Normal",
+      "isDefault": false,
+      "para": {
+        "spaceAfter": 0,
+        "line": 240
+      },
+      "run": {
+        "size": 20
+      }
+    },
+    {
+      "id": "TOC1",
+      "name": "toc 1",
+      "kind": "paragraph",
+      "basedOn": "Normal",
+      "isDefault": false,
+      "para": {
+        "spaceAfter": 100,
+        "tabs": [
+          {
+            "pos": 9016,
+            "align": "right",
+            "leader": "."
+          }
+        ]
+      },
+      "run": {}
+    },
+    {
+      "id": "TOC2",
+      "name": "toc 2",
+      "kind": "paragraph",
+      "basedOn": "Normal",
+      "isDefault": false,
+      "para": {
+        "spaceAfter": 100,
+        "indentLeft": 220,
+        "tabs": [
+          {
+            "pos": 9016,
+            "align": "right",
+            "leader": "."
+          }
+        ]
+      },
+      "run": {}
+    },
+    {
+      "id": "TOC3",
+      "name": "toc 3",
+      "kind": "paragraph",
+      "basedOn": "Normal",
+      "isDefault": false,
+      "para": {
+        "spaceAfter": 100,
+        "indentLeft": 440,
+        "tabs": [
+          {
+            "pos": 9016,
+            "align": "right",
+            "leader": "."
+          }
+        ]
+      },
+      "run": {}
+    },
+    {
+      "id": "Bibliography",
+      "name": "Bibliography",
+      "kind": "paragraph",
+      "basedOn": "Normal",
+      "isDefault": false,
+      "para": {
+        "indentLeft": 720,
+        "indentFirst": -720
+      },
+      "run": {}
     }
   ],
   "defaultRun": {
@@ -357,5 +557,61 @@
         }
       ]
     }
-  ]
+  ],
+  "notes": [
+    {
+      "kind": "footnote",
+      "id": 1,
+      "blocks": [
+        {
+          "type": "paragraph",
+          "style": "FootnoteText",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "A note",
+              "marks": {}
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "comments": [
+    {
+      "id": "0",
+      "author": "Prism",
+      "initials": "P",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Check",
+              "marks": {}
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "headers": [],
+  "sources": [
+    {
+      "tag": "Doe24",
+      "kind": "Report",
+      "title": "Docs",
+      "authors": [
+        "Doe, J"
+      ],
+      "year": "2024",
+      "publisher": "",
+      "url": ""
+    }
+  ],
+  "settings": {
+    "trackRevisions": true,
+    "autoHyphenation": false
+  }
 }

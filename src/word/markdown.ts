@@ -7,7 +7,7 @@
  * drops tables, images or fields.
  */
 import { lexer, type Token, type Tokens } from "marked";
-import { BULLET_NUM_ID, DECIMAL_NUM_ID, isParagraph, type Block, type Inline, type Marks, type Paragraph } from "./model";
+import { BULLET_NUM_ID, DECIMAL_NUM_ID, isParagraph, isTable, type Block, type Inline, type Marks, type Paragraph, type Table } from "./model";
 import { normalize } from "./ops";
 
 export interface MarkdownExport {
@@ -34,6 +34,10 @@ function inlineMd(inl: Inline, objects: Map<string, Block | Inline>): string {
       return "\t";
     case "break":
       return "\\\n";
+    case "image":
+    case "shape":
+    case "note":
+    case "comment":
     case "opaque": {
       const id = `i${objects.size}`;
       objects.set(id, inl);
@@ -86,6 +90,12 @@ export function toMarkdown(blocks: Block[]): MarkdownExport {
   let prevList = false;
   while (i < blocks.length) {
     const b = blocks[i]!;
+    if (isTable(b) && simpleTable(b)) {
+      chunks.push(tableMd(b, objects));
+      prevList = false;
+      i++;
+      continue;
+    }
     if (!isParagraph(b)) {
       const id = `b${objects.size}`;
       objects.set(id, b);
@@ -132,6 +142,17 @@ export function toMarkdown(blocks: Block[]): MarkdownExport {
     i++;
   }
   return { markdown: chunks.join("\n\n") + "\n", objects };
+}
+
+/** GFM pipe tables can express tables without spans/merges and single-paragraph cells. */
+function simpleTable(t: Table): boolean {
+  return t.rows.length > 0 && t.rows.every((r) => r.cells.length === t.rows[0]!.cells.length && r.cells.every((c) => c.span <= 1 && !c.vMerge && !c.shading && c.blocks.length === 1 && isParagraph(c.blocks[0]!) && !c.blocks[0]!.list && !c.blocks[0]!.style));
+}
+
+function tableMd(t: Table, objects: Map<string, Block | Inline>): string {
+  const row = (r: Table["rows"][number]) => `| ${r.cells.map((c) => paragraphInlines(c.blocks[0] as Paragraph, objects).replace(/\|/g, "\\|").replace(/\n/g, " ")).join(" | ")} |`;
+  const [head, ...rest] = t.rows;
+  return [row(head!), `|${head!.cells.map(() => " --- ").join("|")}|`, ...rest.map(row)].join("\n");
 }
 
 let bulletIds = new Set<number>([BULLET_NUM_ID]);
@@ -280,6 +301,23 @@ function blocksFrom(tokens: Token[], objects: Map<string, Block | Inline>, out: 
           out.push(para(inl, { list: { numId: l.ordered ? DECIMAL_NUM_ID : BULLET_NUM_ID, level: ctx.level } }));
           blocksFrom(nested, objects, out, { ...ctx, level: Math.min(8, ctx.level + 1) });
         }
+        break;
+      }
+      case "table": {
+        const tt = t as Tokens.Table;
+        const cell = (c: Tokens.TableCell) => {
+          const inl: Inline[] = [];
+          inlinesFrom(c.tokens, {}, objects, inl);
+          return { blocks: [para(inl)], span: 1 };
+        };
+        const cols = tt.header.length;
+        const w = Math.floor(9026 / Math.max(1, cols));
+        out.push({
+          type: "table",
+          grid: Array.from({ length: cols }, () => w),
+          borders: true,
+          rows: [{ header: true, cells: tt.header.map(cell) }, ...tt.rows.map((r) => ({ cells: r.map(cell) }))],
+        });
         break;
       }
       case "hr":

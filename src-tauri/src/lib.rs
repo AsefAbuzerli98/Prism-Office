@@ -128,6 +128,75 @@ fn update_word_document(
     docs.set_word(id, content)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImageData {
+    mime: String,
+    /// Base64-encoded bytes.
+    data: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AddedImage {
+    rel_id: String,
+    cx: u64,
+    cy: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FontData {
+    name: String,
+    style: String,
+    data: String,
+}
+
+fn b64() -> base64::engine::GeneralPurpose {
+    base64::engine::general_purpose::STANDARD
+}
+
+#[tauri::command]
+fn get_word_image(
+    id: u64,
+    rel_id: String,
+    docs: State<'_, DocumentRegistry>,
+) -> Result<Option<ImageData>, DocError> {
+    use base64::Engine;
+    Ok(docs
+        .word_image(id, &rel_id)?
+        .map(|(mime, bytes)| ImageData {
+            mime,
+            data: b64().encode(bytes),
+        }))
+}
+
+#[tauri::command]
+fn add_word_image(
+    id: u64,
+    data: String,
+    docs: State<'_, DocumentRegistry>,
+) -> Result<AddedImage, String> {
+    use base64::Engine;
+    let bytes = b64().decode(data.as_bytes()).map_err(|e| e.to_string())?;
+    let (rel_id, cx, cy) = docs.add_word_image(id, bytes).map_err(|e| e.to_string())?;
+    Ok(AddedImage { rel_id, cx, cy })
+}
+
+#[tauri::command]
+fn get_word_fonts(id: u64, docs: State<'_, DocumentRegistry>) -> Result<Vec<FontData>, DocError> {
+    use base64::Engine;
+    Ok(docs
+        .word_fonts(id)?
+        .into_iter()
+        .map(|f| FontData {
+            name: f.name,
+            style: f.style,
+            data: b64().encode(f.data),
+        })
+        .collect())
+}
+
 // ---- windows -----------------------------------------------------------------
 
 #[tauri::command]
@@ -272,6 +341,9 @@ pub fn run() {
             list_documents,
             get_word_document,
             update_word_document,
+            get_word_image,
+            add_word_image,
+            get_word_fonts,
             open_document_window,
             take_pending_opens,
             recent_files,

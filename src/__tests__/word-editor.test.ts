@@ -3,9 +3,10 @@ import { BrowserHost } from "../core/host";
 import { monoMeasurer } from "../word/layout";
 import { WordEditor } from "../word/editor";
 import { paragraphText } from "../word/ops";
+import { blockLabel } from "../word/model";
 import type { Paragraph } from "../word/model";
 
-const texts = (ed: WordEditor) => ed.doc!.blocks.map((b) => (b.type === "paragraph" ? paragraphText(b) : `[${b.label}]`));
+const texts = (ed: WordEditor) => ed.doc!.blocks.map((b) => (b.type === "paragraph" ? paragraphText(b) : `[${blockLabel(b)}]`));
 
 async function setup() {
   const host = new BrowserHost(localStorage, () => null);

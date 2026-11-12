@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { History } from "../word/history";
+import { blockLabel } from "../word/model";
 import { paragraph, type Block, type Paragraph } from "../word/model";
 import {
   applyMarks, blockLength, deleteRange, insertBlocks, insertText, marksAt, normalize, paragraphText,
   pos, rangeHasMark, sliceBlocks, splitParagraph, stepPos, updateParagraphs, wordBoundary,
 } from "../word/ops";
 
-const texts = (blocks: Block[]) => blocks.map((b) => (b.type === "paragraph" ? paragraphText(b) : `[${b.label}]`));
+const texts = (blocks: Block[]) => blocks.map((b) => (b.type === "paragraph" ? paragraphText(b) : `[${blockLabel(b)}]`));
 const P = (b: Block) => b as Paragraph;
 
 describe("word ops", () => {

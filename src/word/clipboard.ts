@@ -1,5 +1,5 @@
 /** HTML ⇄ blocks for clipboard interop (P2-10). */
-import { BULLET_NUM_ID, DECIMAL_NUM_ID, isParagraph, type Block, type Inline, type Marks, type Paragraph } from "./model";
+import { BULLET_NUM_ID, DECIMAL_NUM_ID, blockLabel, isParagraph, isTable, type Block, type Inline, type Marks, type Paragraph, type Table } from "./model";
 import { normalize, paragraphText } from "./ops";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -9,6 +9,9 @@ function inlineHtml(i: Inline): string {
   if (i.type === "tab") return "&emsp;";
   if (i.type === "break") return "<br>";
   if (i.type === "opaque") return i.label ? `<span data-prism-opaque>[${esc(i.label)}]</span>` : "";
+  if (i.type === "image") return `<span data-prism-opaque>[${esc(i.descr || "Image")}]</span>`;
+  if (i.type === "shape") return `<span data-prism-opaque>[${esc(i.preset)}]</span>`;
+  if (i.type === "note" || i.type === "comment") return "";
   const m = i.marks;
   let s = esc(i.text);
   const css: string[] = [];
@@ -33,9 +36,14 @@ export function blocksToHtml(blocks: Block[]): string {
     while (list.length > level) out.push(`</${list.pop()!.tag}>`);
   };
   for (const b of blocks) {
+    if (isTable(b)) {
+      closeTo(0);
+      out.push(tableHtml(b));
+      continue;
+    }
     if (!isParagraph(b)) {
       closeTo(0);
-      out.push(`<p data-prism-opaque>[${esc(b.label)}]</p>`);
+      out.push(`<p data-prism-opaque>[${esc(blockLabel(b))}]</p>`);
       continue;
     }
     const body = b.inlines.map(inlineHtml).join("");
@@ -58,8 +66,30 @@ export function blocksToHtml(blocks: Block[]): string {
   return out.join("");
 }
 
+function tableHtml(t: Table): string {
+  const rows = t.rows.map((r) => {
+    const tag = r.header ? "th" : "td";
+    const cells = r.cells
+      .filter((c) => c.vMerge !== "continue")
+      .map((c) => {
+        const attrs = (c.span > 1 ? ` colspan="${c.span}"` : "") + (c.shading ? ` style="background:#${c.shading}"` : "");
+        return `<${tag}${attrs}>${blocksToHtml(c.blocks)}</${tag}>`;
+      });
+    return `<tr>${cells.join("")}</tr>`;
+  });
+  return `<table${t.borders ? ' border="1" style="border-collapse:collapse"' : ""}>${rows.join("")}</table>`;
+}
+
 export function blocksToText(blocks: Block[]): string {
-  return blocks.map((b) => (isParagraph(b) ? paragraphText(b).replace(/￼/g, "") : `[${b.label}]`)).join("\n");
+  return blocks
+    .map((b) =>
+      isParagraph(b)
+        ? paragraphText(b).replace(/\uFFFC/g, "")
+        : isTable(b)
+          ? b.rows.map((r) => r.cells.map((c) => blocksToText(c.blocks)).join("\t")).join("\n")
+          : `[${blockLabel(b)}]`,
+    )
+    .join("\n");
 }
 
 const BLOCK_TAGS = new Set(["P", "DIV", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "BLOCKQUOTE", "PRE", "TR", "SECTION", "ARTICLE", "HEADER", "FOOTER"]);
@@ -67,12 +97,43 @@ const BLOCK_TAGS = new Set(["P", "DIV", "H1", "H2", "H3", "H4", "H5", "H6", "LI"
 /** Parse clipboard HTML into blocks (formatting subset: b/i/u/s/a/code/headings/lists). */
 export function htmlToBlocks(html: string): Block[] {
   const doc = new DOMParser().parseFromString(html, "text/html");
-  const out: Paragraph[] = [];
+  return elementToBlocks(doc.body);
+}
+
+function tableFromElement(el: Element): Table {
+  const rows = [...el.querySelectorAll(":scope > tr, :scope > thead > tr, :scope > tbody > tr, :scope > tfoot > tr")];
+  const cols = Math.max(1, ...rows.map((r) => [...r.children].reduce((n, c) => n + (Number(c.getAttribute("colspan")) || 1), 0)));
+  const w = Math.floor(9026 / cols);
+  return {
+    type: "table",
+    grid: Array.from({ length: cols }, () => w),
+    borders: true,
+    rows: rows.map((r) => ({
+      header: r.parentElement?.tagName === "THEAD" || [...r.children].every((c) => c.tagName === "TH") || undefined,
+      cells: [...r.children]
+        .filter((c) => c.tagName === "TD" || c.tagName === "TH")
+        .map((c) => {
+          const blocks = elementToBlocks(c);
+          const bg = (c as HTMLElement).style?.backgroundColor;
+          const hex = bg?.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+          return {
+            blocks: blocks.length ? blocks : [{ type: "paragraph" as const, inlines: [] }],
+            span: Number(c.getAttribute("colspan")) || 1,
+            ...(hex ? { shading: hex.slice(1, 4).map((v) => Number(v).toString(16).padStart(2, "0")).join("").toUpperCase() } : {}),
+          };
+        }),
+    })),
+  };
+}
+
+function elementToBlocks(root: Element): Block[] {
+  const out: Block[] = [];
   let cur: Paragraph | null = null;
-  const start = (props: Partial<Paragraph> = {}) => {
-    cur = { type: "paragraph", ...props, inlines: [] };
-    out.push(cur);
-    return cur;
+  const start = (props: Partial<Paragraph> = {}): Paragraph => {
+    const p: Paragraph = { type: "paragraph", ...props, inlines: [] };
+    cur = p;
+    out.push(p);
+    return p;
   };
   const ensure = () => cur ?? start();
 
@@ -93,6 +154,11 @@ export function htmlToBlocks(html: string): Block[] {
     if (!(node instanceof Element)) return;
     const tag = node.tagName;
     if (tag === "STYLE" || tag === "SCRIPT" || tag === "META" || tag === "TITLE") return;
+    if (tag === "TABLE") {
+      out.push(tableFromElement(node));
+      cur = null;
+      return;
+    }
     if (tag === "BR") {
       ensure().inlines.push({ type: "break", kind: "line" });
       return;
@@ -127,9 +193,10 @@ export function htmlToBlocks(html: string): Block[] {
     }
     node.childNodes.forEach((c) => walk(c, m, newCtx));
   };
-  doc.body.childNodes.forEach((n) => walk(n, {}, { list: [] }));
+  root.childNodes.forEach((n) => walk(n, {}, { list: [] }));
   const cleaned = out
     .map((p) => {
+      if (!isParagraph(p)) return p;
       const inl = normalize(p.inlines);
       // trim collapsed whitespace at paragraph edges
       const first = inl[0];
@@ -138,7 +205,7 @@ export function htmlToBlocks(html: string): Block[] {
       if (last?.type === "text") inl[inl.length - 1] = { ...last, text: last.text.replace(/\s+$/, "") };
       return { ...p, inlines: normalize(inl) };
     })
-    .filter((p, i, arr) => p.inlines.length > 0 || p.style || p.list || (i > 0 && i < arr.length - 1));
+    .filter((p, i, arr) => !isParagraph(p) || p.inlines.length > 0 || p.style || p.list || (i > 0 && i < arr.length - 1));
   return cleaned.length ? cleaned : [];
 }
 

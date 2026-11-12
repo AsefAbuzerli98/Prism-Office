@@ -22,7 +22,23 @@ export interface Marks {
   vertAlign?: VertAlign;
   style?: string;
   link?: string;
+  rtl?: boolean;
+  revision?: Revision;
   extra?: RawXml[];
+}
+
+export interface Revision {
+  kind: "insert" | "delete";
+  id: string;
+  author: string;
+  date?: string;
+}
+
+export interface TabStop {
+  /** Twips from the page content edge. */
+  pos: number;
+  align: "left" | "center" | "right" | "decimal" | "bar" | "clear";
+  leader?: string | null;
 }
 
 export interface ParaFormat {
@@ -38,6 +54,8 @@ export interface ParaFormat {
   keepNext?: boolean;
   pageBreakBefore?: boolean;
   outlineLevel?: number;
+  bidi?: boolean;
+  tabs?: TabStop[];
 }
 
 export interface ListRef {
@@ -55,13 +73,88 @@ export interface Paragraph extends ParaFormat {
 
 export type BreakKind = "line" | "page" | "column";
 
+export type NoteKind = "footnote" | "endnote";
+
 export type Inline =
   | { type: "text"; text: string; marks: Marks }
   | { type: "tab"; marks: Marks }
   | { type: "break"; kind: BreakKind }
+  /** Picture; `cx`/`cy` in EMU (914400 per inch). */
+  | { type: "image"; relId: string; cx: number; cy: number; descr: string; xml: string }
+  | { type: "shape"; preset: string; cx: number; cy: number; stroke: string; fill?: string; xml: string }
+  | { type: "note"; kind: NoteKind; id: number; xml: string }
+  | { type: "comment"; id: string; edge: "start" | "end" | "reference" }
   | { type: "opaque"; label: string; xml: string };
 
-export type Block = Paragraph | { type: "opaque"; label: string; xml: string };
+export interface TableCell {
+  blocks: Block[];
+  span: number;
+  vMerge?: "restart" | "continue";
+  /** Twips. */
+  width?: number;
+  shading?: string;
+  extra?: RawXml[];
+}
+
+export interface TableRow {
+  cells: TableCell[];
+  header?: boolean;
+  props?: string;
+}
+
+export interface Table {
+  type: "table";
+  /** Grid column widths, twips. */
+  grid: number[];
+  rows: TableRow[];
+  borders: boolean;
+  props?: string;
+}
+
+export type OpaqueBlock = { type: "opaque"; label: string; xml: string };
+export type Block = Paragraph | Table | OpaqueBlock;
+
+export interface Note {
+  kind: NoteKind;
+  id: number;
+  blocks: Block[];
+}
+
+export interface Comment {
+  id: string;
+  author: string;
+  initials: string;
+  date?: string;
+  blocks: Block[];
+}
+
+export interface HeaderFooter {
+  kind: "header" | "footer";
+  which: string;
+  relId: string;
+  blocks: Block[];
+}
+
+export interface Source {
+  tag: string;
+  kind: string;
+  title: string;
+  authors: string[];
+  year: string;
+  publisher: string;
+  url: string;
+}
+
+export interface DocSettings {
+  trackRevisions: boolean;
+  autoHyphenation: boolean;
+}
+
+export interface Columns {
+  count: number;
+  space: number;
+  separator: boolean;
+}
 
 export interface Section {
   pageWidth: number;
@@ -73,6 +166,7 @@ export interface Section {
   marginHeader: number;
   marginFooter: number;
   landscape: boolean;
+  columns?: Columns | null;
   extra?: RawXml[];
 }
 
@@ -107,6 +201,11 @@ export interface WordDocument {
   defaultRun: Marks;
   defaultPara: ParaFormat;
   numbering: NumberingDef[];
+  notes?: Note[];
+  comments?: Comment[];
+  headers?: HeaderFooter[];
+  sources?: Source[];
+  settings?: DocSettings;
 }
 
 export const BULLET_NUM_ID = 9001;
@@ -145,6 +244,11 @@ export const BUILTIN_STYLES: StyleInfo[] = [
   style("Heading4", "heading 4", { keepNext: true, spaceBefore: 80, spaceAfter: 40, outlineLevel: 3 }, { bold: true, italic: true }, "Normal"),
   style("Quote", "Quote", { spaceBefore: 160, spaceAfter: 160, indentLeft: 864, indentRight: 864 }, { italic: true, color: "404040" }),
   style("Code", "Code", { spaceAfter: 0, line: 240 }, { font: "Consolas", size: 20 }),
+  style("FootnoteText", "footnote text", { spaceAfter: 0, line: 240 }, { size: 20 }),
+  style("TOC1", "toc 1", { spaceAfter: 100, tabs: [{ pos: 9016, align: "right", leader: "." }] }, {}),
+  style("TOC2", "toc 2", { spaceAfter: 100, indentLeft: 220, tabs: [{ pos: 9016, align: "right", leader: "." }] }, {}),
+  style("TOC3", "toc 3", { spaceAfter: 100, indentLeft: 440, tabs: [{ pos: 9016, align: "right", leader: "." }] }, {}),
+  style("Bibliography", "Bibliography", { indentLeft: 720, indentFirst: -720 }, {}),
 ];
 
 const levels = (bullet: boolean): LevelDef[] =>
@@ -173,7 +277,26 @@ export function blankDocument(): WordDocument {
     defaultRun: { font: "Calibri", size: 22 },
     defaultPara: { spaceAfter: 160, line: 259 },
     numbering: BUILTIN_NUMBERING,
+    notes: [],
+    comments: [],
+    headers: [],
+    sources: [],
+    settings: { trackRevisions: false, autoHyphenation: false },
   };
 }
 
 export const isParagraph = (b: Block): b is Paragraph => b.type === "paragraph";
+export const isTable = (b: Block): b is Table => b.type === "table";
+export const blockLabel = (b: Block): string => (b.type === "paragraph" ? "" : b.type === "table" ? "Table" : b.label);
+
+export const EMU_PER_PX = 9525;
+
+export function newTable(rows: number, cols: number, contentTwips = 9026): Table {
+  const w = Math.floor(contentTwips / cols);
+  return {
+    type: "table",
+    grid: Array.from({ length: cols }, () => w),
+    borders: true,
+    rows: Array.from({ length: rows }, () => ({ cells: Array.from({ length: cols }, () => ({ blocks: [paragraph()], span: 1 })) })),
+  };
+}

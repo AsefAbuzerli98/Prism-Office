@@ -112,9 +112,16 @@ fn reads_modelled_and_preserves_unmodelled_content() {
             level: 1
         })
     );
-    assert!(
-        matches!(&doc.blocks[3], Block::Opaque { label, xml } if label == "Table" && xml.contains("<w:t>cell</w:t>"))
-    );
+    match &doc.blocks[3] {
+        Block::Table(t) => {
+            assert_eq!(t.rows.len(), 1);
+            assert!(t.props.as_deref().unwrap().contains("tblW"));
+            assert!(
+                matches!(&t.rows[0].cells[0].blocks[0], Block::Paragraph(p) if p.text() == "cell")
+            );
+        }
+        b => panic!("{b:?}"),
+    }
     assert!(matches!(
         para(&doc, 4).inlines[..],
         [Inline::Break {
@@ -128,7 +135,15 @@ fn reads_modelled_and_preserves_unmodelled_content() {
         (s.page_width, s.margin_left, s.margin_header),
         (16838, 1300, 500)
     );
-    assert_eq!(s.extra.len(), 2, "headerReference + cols preserved");
+    assert_eq!(s.extra.len(), 1, "headerReference preserved");
+    assert_eq!(
+        s.columns,
+        Some(Columns {
+            count: 1,
+            space: 708,
+            separator: false
+        })
+    );
 
     // styles: template defines Normal/Heading1; builtins supply the rest
     let h1 = doc.styles.iter().find(|s| s.id == "Heading1").unwrap();

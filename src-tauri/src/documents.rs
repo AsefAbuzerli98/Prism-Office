@@ -182,6 +182,33 @@ impl DocumentRegistry {
         Ok(())
     }
 
+    fn with_word_package<T>(
+        &self,
+        id: u64,
+        f: impl FnOnce(&mut OpenDocument) -> Result<T, DocError>,
+    ) -> Result<T, DocError> {
+        let mut docs = self.docs.lock().unwrap();
+        let doc = docs.get_mut(&id).ok_or(DocError::NotFound(id))?;
+        if doc.kind != DocumentKind::Document {
+            return Err(DocError::NotWord(id));
+        }
+        f(doc)
+    }
+
+    /// Picture bytes for an `Inline::Image` relationship id.
+    pub fn word_image(&self, id: u64, rel_id: &str) -> Result<Option<(String, Vec<u8>)>, DocError> {
+        self.with_word_package(id, |d| Ok(prism_word::image_data(&d.package, rel_id)?))
+    }
+
+    /// Store picture bytes in the package; returns `(relId, cx, cy)`.
+    pub fn add_word_image(&self, id: u64, bytes: Vec<u8>) -> Result<(String, u64, u64), DocError> {
+        self.with_word_package(id, |d| Ok(prism_word::add_image(&mut d.package, bytes)?))
+    }
+
+    pub fn word_fonts(&self, id: u64) -> Result<Vec<prism_word::EmbeddedFont>, DocError> {
+        self.with_word_package(id, |d| Ok(prism_word::embedded_fonts(&d.package)?))
+    }
+
     pub fn get(&self, id: u64) -> Result<DocumentInfo, DocError> {
         let docs = self.docs.lock().unwrap();
         let doc = docs.get(&id).ok_or(DocError::NotFound(id))?;
@@ -227,6 +254,15 @@ mod tests {
         reg.save(d.id, Some(&path)).unwrap();
         let reopened = reg.open(&path).unwrap();
         assert_eq!(reg.word(reopened.id).unwrap().plain_text(), "Salam dünya");
+
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend(10u32.to_be_bytes());
+        png.extend(20u32.to_be_bytes());
+        let (rel, cx, cy) = reg.add_word_image(reopened.id, png.clone()).unwrap();
+        assert_eq!((cx, cy), (95250, 190500));
+        let (mime, data) = reg.word_image(reopened.id, &rel).unwrap().unwrap();
+        assert_eq!((mime.as_str(), data), ("image/png", png));
+        assert!(reg.word_fonts(reopened.id).unwrap().is_empty());
     }
 
     #[test]

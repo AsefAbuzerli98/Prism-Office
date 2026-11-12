@@ -59,6 +59,7 @@ pub(crate) fn parse_rpr(reader: &mut Reader<&[u8]>, empty: bool) -> Result<Marks
                 _ => keep_raw = true,
             },
             "highlight" => m.highlight = attr(&e, "val"),
+            "rtl" => m.rtl = Some(on_off(&e)),
             "vertAlign" => match attr(&e, "val").as_deref() {
                 Some("superscript") => m.vert_align = Some(VertAlign::Superscript),
                 Some("subscript") => m.vert_align = Some(VertAlign::Subscript),
@@ -110,6 +111,18 @@ pub(crate) fn parse_ppr(reader: &mut Reader<&[u8]>, empty: bool) -> Result<Parse
                 None => keep_raw = true,
             },
             "outlineLvl" => f.outline_level = parse_u32(&e, "val").map(|v| v as u8),
+            "bidi" => f.bidi = on_off(&e),
+            "tabs" if !is_empty => {
+                let xml = capture(reader, &e, false)?;
+                match parse_tabs(&xml) {
+                    Some(t) => f.tabs = t,
+                    None => extra.push(RawXml {
+                        name: qname(&e),
+                        xml,
+                    }),
+                }
+                continue;
+            }
             "spacing"
                 if only(&["before", "after", "line", "lineRule"])
                     && matches!(attr(&e, "lineRule").as_deref(), None | Some("auto")) =>
@@ -149,6 +162,50 @@ pub(crate) fn parse_ppr(reader: &mut Reader<&[u8]>, empty: bool) -> Result<Parse
     }
 }
 
+fn parse_tabs(xml: &str) -> Option<Vec<TabStop>> {
+    let mut r = Reader::from_str(xml);
+    let mut out = Vec::new();
+    loop {
+        match r.read_event().ok()? {
+            Event::Start(e) | Event::Empty(e) if local(&e) == "tab" => {
+                let attrs = prism_openxml::xml::attrs_of(&e);
+                if attrs
+                    .iter()
+                    .any(|(k, _)| !["val", "pos", "leader"].contains(&k.as_str()))
+                {
+                    return None;
+                }
+                let align = match attr(&e, "val")?.as_str() {
+                    "left" | "start" => TabAlign::Left,
+                    "center" => TabAlign::Center,
+                    "right" | "end" => TabAlign::Right,
+                    "decimal" => TabAlign::Decimal,
+                    "bar" => TabAlign::Bar,
+                    "clear" => TabAlign::Clear,
+                    _ => return None,
+                };
+                let leader = match attr(&e, "leader").as_deref() {
+                    None | Some("none") => None,
+                    Some("dot") => Some('.'),
+                    Some("hyphen") => Some('-'),
+                    Some("underscore") => Some('_'),
+                    Some("middleDot") => Some('·'),
+                    Some("heavy") => Some('━'),
+                    Some(_) => return None,
+                };
+                out.push(TabStop {
+                    pos: attr(&e, "pos")?.parse().ok()?,
+                    align,
+                    leader,
+                });
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    Some(out)
+}
+
 fn parse_num_pr(xml: &str) -> Option<ListRef> {
     let mut r = Reader::from_str(xml);
     let (mut level, mut num) = (0u8, None);
@@ -167,8 +224,14 @@ fn parse_num_pr(xml: &str) -> Option<ListRef> {
         .map(|num_id| ListRef { num_id, level })
 }
 
-struct Ctx<'a> {
-    rels: &'a Relationships,
+pub(crate) struct Ctx<'a> {
+    pub rels: &'a Relationships,
+}
+
+#[derive(Clone, Default)]
+struct RunCtx {
+    link: Option<String>,
+    revision: Option<Revision>,
 }
 
 fn label_for(name: &str) -> &'static str {
@@ -177,15 +240,11 @@ fn label_for(name: &str) -> &'static str {
         "object" => "Object",
         "tbl" => "Table",
         "sdt" => "Content control",
-        "ins" => "Insertion",
-        "del" => "Deletion",
         "fldSimple" => "Field",
         "oMath" | "oMathPara" => "Equation",
-        "footnoteReference" => "Footnote",
-        "endnoteReference" => "Endnote",
-        "commentReference" => "Comment",
         "sym" => "Symbol",
         "smartTag" | "customXml" => "Tagged text",
+        "moveFrom" | "moveTo" => "Moved text",
         _ => "Element",
     }
 }
@@ -196,8 +255,6 @@ fn invisible(name: &str) -> bool {
         name,
         "bookmarkStart"
             | "bookmarkEnd"
-            | "commentRangeStart"
-            | "commentRangeEnd"
             | "permStart"
             | "permEnd"
             | "lastRenderedPageBreak"
@@ -205,6 +262,14 @@ fn invisible(name: &str) -> bool {
             | "moveFromRangeEnd"
             | "moveToRangeStart"
             | "moveToRangeEnd"
+            | "fldChar"
+            | "instrText"
+            | "footnoteRef"
+            | "endnoteRef"
+            | "separator"
+            | "continuationSeparator"
+            | "annotationRef"
+            | "delInstrText"
     )
 }
 
@@ -224,13 +289,77 @@ fn push_text(inlines: &mut Vec<Inline>, text: &str, marks: &Marks) {
     });
 }
 
-/// Parse a `w:r`. If it contains anything beyond text/tab/break, the whole
-/// run is preserved as one opaque inline.
+/// Inline picture details from a run containing `w:drawing/wp:inline`.
+fn image_from_run(raw: &str) -> Option<(String, u64, u64, String)> {
+    let mut r = Reader::from_str(raw);
+    let (mut inline, mut embed, mut cx, mut cy, mut descr, mut blips) =
+        (false, None, 0u64, 0u64, String::new(), 0);
+    loop {
+        match r.read_event().ok()? {
+            Event::Start(e) | Event::Empty(e) => match local(&e).as_str() {
+                "inline" => inline = true,
+                "anchor" => return None,
+                "extent" if cx == 0 => {
+                    cx = attr(&e, "cx")?.parse().ok()?;
+                    cy = attr(&e, "cy")?.parse().ok()?;
+                }
+                "docPr" => descr = attr(&e, "descr").unwrap_or_default(),
+                "blip" => {
+                    blips += 1;
+                    embed = attr(&e, "embed");
+                }
+                _ => {}
+            },
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    (inline && blips == 1).then_some(())?;
+    Some((embed?, cx, cy, descr))
+}
+
+/// Inline preset shape from a run containing `wp:inline/…/wps:wsp`.
+fn shape_from_run(raw: &str) -> Option<(String, u64, u64, String, Option<String>)> {
+    let mut r = Reader::from_str(raw);
+    let (mut inline, mut wsp, mut preset, mut cx, mut cy) = (false, false, None, 0u64, 0u64);
+    let (mut stroke, mut fill) = (String::new(), None);
+    let mut in_ln = 0;
+    loop {
+        match r.read_event().ok()? {
+            Event::Start(e) => match local(&e).as_str() {
+                "inline" => inline = true,
+                "anchor" => return None,
+                "wsp" => wsp = true,
+                "ln" => in_ln += 1,
+                "prstGeom" => preset = attr(&e, "prst"),
+                _ => {}
+            },
+            Event::Empty(e) => match local(&e).as_str() {
+                "extent" if cx == 0 => {
+                    cx = attr(&e, "cx")?.parse().ok()?;
+                    cy = attr(&e, "cy")?.parse().ok()?;
+                }
+                "srgbClr" if in_ln > 0 => stroke = attr(&e, "val").unwrap_or_default(),
+                "srgbClr" if fill.is_none() => fill = attr(&e, "val"),
+                _ => {}
+            },
+            Event::End(e) if e.local_name().into_inner() == "ln" => in_ln -= 1,
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    (inline && wsp).then_some(())?;
+    Some((preset?, cx, cy, stroke, fill))
+}
+
+/// Parse a `w:r`. Runs with text/tab/break become text inlines; recognised
+/// special runs (pictures, note references, field codes) map to dedicated
+/// inlines; anything else is preserved as one opaque inline.
 fn parse_run(
     reader: &mut Reader<&[u8]>,
     start: &BytesStart<'_>,
     empty: bool,
-    link: Option<&str>,
+    rc: &RunCtx,
     out: &mut Vec<Inline>,
 ) -> Result<()> {
     if empty {
@@ -240,11 +369,14 @@ fn parse_run(
     let mut r = Reader::from_str(&raw);
     r.read_event().map_err(Error::xml)?; // <w:r>
     let mut marks = Marks {
-        link: link.map(str::to_owned),
+        link: rc.link.clone(),
+        revision: rc.revision.clone(),
         ..Default::default()
     };
     let mut items: Vec<Inline> = Vec::new();
     let mut opaque: Option<&'static str> = None;
+    let mut special: Option<Inline> = None;
+    let mut hidden_only = true;
     loop {
         let (e, is_empty) = match r.read_event().map_err(Error::xml)? {
             Event::Start(e) => (e.into_owned(), false),
@@ -252,12 +384,18 @@ fn parse_run(
             Event::End(_) | Event::Eof => break,
             _ => continue,
         };
-        match local(&e).as_str() {
+        let name = local(&e);
+        if name != "rPr" && !invisible(&name) {
+            hidden_only = false;
+        }
+        match name.as_str() {
             "rPr" => {
-                marks = parse_rpr(&mut r, is_empty)?;
-                if let Some(l) = link {
-                    marks.link = Some(l.to_string());
-                }
+                let m = parse_rpr(&mut r, is_empty)?;
+                marks = Marks {
+                    link: rc.link.clone(),
+                    revision: rc.revision.clone(),
+                    ..m
+                };
             }
             "t" | "delText" if !is_empty => {
                 let mut s = String::new();
@@ -273,7 +411,7 @@ fn parse_run(
                 }
                 push_text(&mut items, &s, &marks);
             }
-            "t" => {}
+            "t" | "delText" => {}
             "tab" => {
                 items.push(Inline::Tab {
                     marks: marks.clone(),
@@ -301,15 +439,86 @@ fn parse_run(
             "noBreakHyphen" => push_text(&mut items, "\u{2011}", &marks),
             "softHyphen" => push_text(&mut items, "\u{00AD}", &marks),
             "lastRenderedPageBreak" => skip(&mut r, is_empty)?,
+            "footnoteReference" | "endnoteReference" => {
+                let kind = if name == "footnoteReference" {
+                    NoteKind::Footnote
+                } else {
+                    NoteKind::Endnote
+                };
+                match attr(&e, "id").and_then(|i| i.parse().ok()) {
+                    Some(id) => {
+                        special = Some(Inline::Note {
+                            kind,
+                            id,
+                            xml: String::new(),
+                        })
+                    }
+                    None => opaque = Some("Element"),
+                }
+                skip(&mut r, is_empty)?;
+            }
+            "commentReference" => {
+                match attr(&e, "id") {
+                    Some(id) => {
+                        special = Some(Inline::Comment {
+                            id,
+                            edge: CommentEdge::Reference,
+                        })
+                    }
+                    None => opaque = Some("Element"),
+                }
+                skip(&mut r, is_empty)?;
+            }
+            "drawing" => {
+                opaque = Some("Image");
+                skip(&mut r, is_empty)?;
+            }
+            n if invisible(n) => skip(&mut r, is_empty)?,
             other => {
                 opaque = Some(label_for(other));
                 skip(&mut r, is_empty)?;
             }
         }
     }
+    let plain = items.is_empty();
+    if opaque == Some("Image") && plain && special.is_none() && rc.revision.is_none() {
+        if let Some((rel_id, cx, cy, descr)) = image_from_run(&raw) {
+            out.push(Inline::Image {
+                rel_id,
+                cx,
+                cy,
+                descr,
+                xml: raw,
+            });
+            return Ok(());
+        }
+        if let Some((preset, cx, cy, stroke, fill)) = shape_from_run(&raw) {
+            out.push(Inline::Shape {
+                preset,
+                cx,
+                cy,
+                stroke,
+                fill,
+                xml: raw,
+            });
+            return Ok(());
+        }
+    }
+    if let Some(sp) = special.filter(|_| opaque.is_none() && plain) {
+        out.push(match sp {
+            Inline::Note { kind, id, .. } => Inline::Note { kind, id, xml: raw },
+            other => other,
+        });
+        return Ok(());
+    }
     if let Some(label) = opaque {
         out.push(Inline::Opaque {
             label: label.to_string(),
+            xml: raw,
+        });
+    } else if hidden_only && plain {
+        out.push(Inline::Opaque {
+            label: String::new(),
             xml: raw,
         });
     } else {
@@ -328,16 +537,33 @@ fn parse_paragraph(reader: &mut Reader<&[u8]>, empty: bool, ctx: &Ctx<'_>) -> Re
     if empty {
         return Ok(p);
     }
-    parse_paragraph_children(reader, ctx, &mut p, None)?;
+    parse_paragraph_children(reader, ctx, &mut p, &RunCtx::default(), true)?;
     Ok(p)
 }
 
-/// Shared by `w:p` and `w:hyperlink` (which nests runs).
+fn revision_of(e: &BytesStart<'_>, kind: RevisionKind) -> Option<Revision> {
+    let attrs = prism_openxml::xml::attrs_of(e);
+    if attrs
+        .iter()
+        .any(|(k, _)| !["id", "author", "date"].contains(&k.as_str()))
+    {
+        return None;
+    }
+    Some(Revision {
+        kind,
+        id: attr(e, "id")?,
+        author: attr(e, "author").unwrap_or_default(),
+        date: attr(e, "date"),
+    })
+}
+
+/// Shared by `w:p`, `w:hyperlink`, `w:ins` and `w:del`.
 fn parse_paragraph_children(
     reader: &mut Reader<&[u8]>,
     ctx: &Ctx<'_>,
     p: &mut Paragraph,
-    link: Option<&str>,
+    rc: &RunCtx,
+    top: bool,
 ) -> Result<()> {
     loop {
         let (e, is_empty) = match reader.read_event().map_err(Error::xml)? {
@@ -349,18 +575,16 @@ fn parse_paragraph_children(
         };
         let name = local(&e);
         match name.as_str() {
-            "pPr" if link.is_none() => {
+            "pPr" if top => {
                 let (style, format, list, extra) = parse_ppr(reader, is_empty)?;
                 p.style = style;
                 p.format = format;
                 p.list = list;
                 p.extra = extra;
             }
-            "r" => parse_run(reader, &e, is_empty, link, &mut p.inlines)?,
+            "r" => parse_run(reader, &e, is_empty, rc, &mut p.inlines)?,
             "proofErr" => skip(reader, is_empty)?,
-            "hyperlink" if link.is_none() && !is_empty => {
-                // Only simple hyperlinks are modelled; anything with extra
-                // attributes (tooltip, history…) stays opaque.
+            "hyperlink" if rc.link.is_none() && rc.revision.is_none() && !is_empty => {
                 let attrs = prism_openxml::xml::attrs_of(&e);
                 let simple = attrs
                     .iter()
@@ -369,7 +593,13 @@ fn parse_paragraph_children(
                     .and_then(|id| ctx.rels.by_id(&id).map(|r| r.target.clone()))
                     .or_else(|| attr(&e, "anchor").map(|a| format!("#{a}")));
                 match (simple, target) {
-                    (true, Some(t)) => parse_paragraph_children(reader, ctx, p, Some(&t))?,
+                    (true, Some(t)) => {
+                        let sub = RunCtx {
+                            link: Some(t),
+                            ..rc.clone()
+                        };
+                        parse_paragraph_children(reader, ctx, p, &sub, false)?
+                    }
                     _ => {
                         let xml = capture(reader, &e, false)?;
                         p.inlines.push(Inline::Opaque {
@@ -378,6 +608,43 @@ fn parse_paragraph_children(
                         });
                     }
                 }
+            }
+            "ins" | "del" if rc.revision.is_none() && !is_empty => {
+                let kind = if name == "ins" {
+                    RevisionKind::Insert
+                } else {
+                    RevisionKind::Delete
+                };
+                match revision_of(&e, kind) {
+                    Some(rev) => {
+                        let sub = RunCtx {
+                            revision: Some(rev),
+                            ..rc.clone()
+                        };
+                        parse_paragraph_children(reader, ctx, p, &sub, false)?
+                    }
+                    None => {
+                        let xml = capture(reader, &e, false)?;
+                        p.inlines.push(Inline::Opaque {
+                            label: "Tracked change".into(),
+                            xml,
+                        });
+                    }
+                }
+            }
+            "commentRangeStart" | "commentRangeEnd"
+                if attr(&e, "id").is_some() && prism_openxml::xml::attrs_of(&e).len() == 1 =>
+            {
+                let edge = if name == "commentRangeStart" {
+                    CommentEdge::Start
+                } else {
+                    CommentEdge::End
+                };
+                p.inlines.push(Inline::Comment {
+                    id: attr(&e, "id").unwrap(),
+                    edge,
+                });
+                skip(reader, is_empty)?;
             }
             n if invisible(n) => {
                 let xml = capture(reader, &e, is_empty)?;
@@ -408,9 +675,10 @@ fn parse_sect_pr(reader: &mut Reader<&[u8]>, empty: bool) -> Result<Section> {
             Event::Eof => return Err(Error::xml("EOF in sectPr")),
             _ => continue,
         };
+        let attrs = prism_openxml::xml::attrs_of(&e);
         match local(&e).as_str() {
             "pgSz"
-                if prism_openxml::xml::attrs_of(&e)
+                if attrs
                     .iter()
                     .all(|(k, _)| ["w", "h", "orient"].contains(&k.as_str())) =>
             {
@@ -434,6 +702,22 @@ fn parse_sect_pr(reader: &mut Reader<&[u8]>, empty: bool) -> Result<Section> {
                 }
                 skip(reader, is_empty)?;
             }
+            "cols"
+                if is_empty
+                    && attrs.iter().all(|(k, _)| {
+                        ["num", "space", "sep", "equalWidth"].contains(&k.as_str())
+                    })
+                    && attr(&e, "equalWidth").as_deref() != Some("0") =>
+            {
+                let count = parse_u32(&e, "num").unwrap_or(1).max(1);
+                let space = parse_u32(&e, "space").unwrap_or(720);
+                let separator = matches!(attr(&e, "sep").as_deref(), Some("1" | "true" | "on"));
+                s.columns = Some(Columns {
+                    count,
+                    space,
+                    separator,
+                });
+            }
             _ => {
                 let xml = capture(reader, &e, is_empty)?;
                 s.extra.push(RawXml {
@@ -442,6 +726,207 @@ fn parse_sect_pr(reader: &mut Reader<&[u8]>, empty: bool) -> Result<Section> {
                 });
             }
         }
+    }
+}
+
+fn parse_table(reader: &mut Reader<&[u8]>, ctx: &Ctx<'_>) -> Result<Table> {
+    let mut t = Table::default();
+    loop {
+        let (e, is_empty) = match reader.read_event().map_err(Error::xml)? {
+            Event::Start(e) => (e.into_owned(), false),
+            Event::Empty(e) => (e.into_owned(), true),
+            Event::End(_) => break,
+            Event::Eof => return Err(Error::xml("EOF in table")),
+            _ => continue,
+        };
+        match local(&e).as_str() {
+            "tblPr" => {
+                let xml = capture(reader, &e, is_empty)?;
+                t.borders = table_has_borders(&xml);
+                t.props = Some(xml);
+            }
+            "tblGrid" if !is_empty => loop {
+                match reader.read_event().map_err(Error::xml)? {
+                    Event::Start(g) | Event::Empty(g) if local(&g) == "gridCol" => {
+                        t.grid.push(parse_u32(&g, "w").unwrap_or(0));
+                    }
+                    Event::End(g) if g.local_name().into_inner() == "tblGrid" => break,
+                    Event::Eof => return Err(Error::xml("EOF in tblGrid")),
+                    _ => {}
+                }
+            },
+            "tr" if !is_empty => t.rows.push(parse_row(reader, ctx)?),
+            _ => skip(reader, is_empty)?,
+        }
+    }
+    Ok(t)
+}
+
+fn table_has_borders(tbl_pr: &str) -> bool {
+    if tbl_pr.contains("TableGrid") || tbl_pr.contains("Grid") {
+        return true;
+    }
+    let Some(start) = tbl_pr.find("tblBorders") else {
+        return false;
+    };
+    let section = &tbl_pr[start..];
+    section.contains("w:val=\"single\"")
+        || section.contains("w:val=\"thick\"")
+        || section.contains("w:val=\"double\"")
+}
+
+fn parse_row(reader: &mut Reader<&[u8]>, ctx: &Ctx<'_>) -> Result<TableRow> {
+    let mut row = TableRow::default();
+    loop {
+        let (e, is_empty) = match reader.read_event().map_err(Error::xml)? {
+            Event::Start(e) => (e.into_owned(), false),
+            Event::Empty(e) => (e.into_owned(), true),
+            Event::End(_) => break,
+            Event::Eof => return Err(Error::xml("EOF in row")),
+            _ => continue,
+        };
+        match local(&e).as_str() {
+            "trPr" => {
+                let xml = capture(reader, &e, is_empty)?;
+                row.header = xml.contains("tblHeader")
+                    && !xml.contains("tblHeader w:val=\"0\"")
+                    && !xml.contains("tblHeader w:val=\"false\"");
+                let stripped = strip_element(&xml, "tblHeader");
+                if stripped.matches('<').count() > 2 {
+                    row.props = Some(stripped);
+                }
+            }
+            "tc" => row.cells.push(parse_cell(reader, ctx, is_empty)?),
+            _ => skip(reader, is_empty)?,
+        }
+    }
+    Ok(row)
+}
+
+/// Remove self-closing `<w:{name} .../>` occurrences from a fragment.
+fn strip_element(xml: &str, name: &str) -> String {
+    let mut out = xml.to_string();
+    let needle = format!("<w:{name}");
+    while let Some(i) = out.find(&needle) {
+        let Some(end) = out[i..].find("/>") else {
+            break;
+        };
+        out.replace_range(i..i + end + 2, "");
+    }
+    out
+}
+
+fn parse_cell(reader: &mut Reader<&[u8]>, ctx: &Ctx<'_>, empty: bool) -> Result<TableCell> {
+    let mut cell = TableCell {
+        blocks: Vec::new(),
+        ..Default::default()
+    };
+    if empty {
+        cell.blocks.push(Block::Paragraph(Paragraph::default()));
+        return Ok(cell);
+    }
+    let mut blocks = Vec::new();
+    loop {
+        let (e, is_empty) = match reader.read_event().map_err(Error::xml)? {
+            Event::Start(e) => (e.into_owned(), false),
+            Event::Empty(e) => (e.into_owned(), true),
+            Event::End(_) => break,
+            Event::Eof => return Err(Error::xml("EOF in cell")),
+            _ => continue,
+        };
+        if local(&e) == "tcPr" {
+            if is_empty {
+                continue;
+            }
+            loop {
+                let (c, ce) = match reader.read_event().map_err(Error::xml)? {
+                    Event::Start(c) => (c.into_owned(), false),
+                    Event::Empty(c) => (c.into_owned(), true),
+                    Event::End(_) => break,
+                    Event::Eof => return Err(Error::xml("EOF in tcPr")),
+                    _ => continue,
+                };
+                let attrs = prism_openxml::xml::attrs_of(&c);
+                match local(&c).as_str() {
+                    "gridSpan" => {
+                        cell.span = parse_u32(&c, "val").unwrap_or(1).max(1);
+                        skip(reader, ce)?;
+                    }
+                    "vMerge" => {
+                        cell.v_merge = Some(if attr(&c, "val").as_deref() == Some("restart") {
+                            VMerge::Restart
+                        } else {
+                            VMerge::Continue
+                        });
+                        skip(reader, ce)?;
+                    }
+                    "tcW" if attr(&c, "type").as_deref() == Some("dxa") => {
+                        cell.width = parse_u32(&c, "w");
+                        skip(reader, ce)?;
+                    }
+                    "shd"
+                        if attrs
+                            .iter()
+                            .all(|(k, _)| ["val", "color", "fill"].contains(&k.as_str()))
+                            && attr(&c, "val").as_deref() == Some("clear")
+                            && attr(&c, "fill").is_some_and(|f| f != "auto") =>
+                    {
+                        cell.shading = attr(&c, "fill");
+                        skip(reader, ce)?;
+                    }
+                    _ => {
+                        let xml = capture(reader, &c, ce)?;
+                        cell.extra.push(RawXml {
+                            name: qname(&c),
+                            xml,
+                        });
+                    }
+                }
+            }
+            continue;
+        }
+        parse_block(reader, &e, is_empty, ctx, &mut blocks, None)?;
+    }
+    if blocks.is_empty() {
+        blocks.push(Block::Paragraph(Paragraph::default()));
+    }
+    cell.blocks = blocks;
+    Ok(cell)
+}
+
+/// Parse one block-level element into `out`.
+fn parse_block(
+    reader: &mut Reader<&[u8]>,
+    e: &BytesStart<'_>,
+    is_empty: bool,
+    ctx: &Ctx<'_>,
+    out: &mut Vec<Block>,
+    section: Option<&mut Section>,
+) -> Result<()> {
+    match local(e).as_str() {
+        "p" => out.push(Block::Paragraph(parse_paragraph(reader, is_empty, ctx)?)),
+        "tbl" if !is_empty => out.push(Block::Table(parse_table(reader, ctx)?)),
+        "sectPr" if section.is_some() => *section.unwrap() = parse_sect_pr(reader, is_empty)?,
+        other => {
+            let label = label_for(other).to_string();
+            let xml = capture(reader, e, is_empty)?;
+            out.push(Block::Opaque { label, xml });
+        }
+    }
+    Ok(())
+}
+
+/// Parse the block children of the current element until its end tag.
+pub(crate) fn parse_blocks(reader: &mut Reader<&[u8]>, ctx: &Ctx<'_>) -> Result<Vec<Block>> {
+    let mut out = Vec::new();
+    loop {
+        let (e, is_empty) = match reader.read_event().map_err(Error::xml)? {
+            Event::Start(e) => (e.into_owned(), false),
+            Event::Empty(e) => (e.into_owned(), true),
+            Event::End(_) | Event::Eof => return Ok(out),
+            _ => continue,
+        };
+        parse_block(reader, &e, is_empty, ctx, &mut out, None)?;
     }
 }
 
@@ -461,26 +946,20 @@ pub fn read_document(xml: &[u8], rels: &Relationships) -> Result<(Vec<Block>, Se
             Event::Eof => break,
             _ => continue,
         };
-        let name = local(&e);
         if !in_body {
-            if name == "body" {
+            if local(&e) == "body" {
                 in_body = true;
             }
             continue;
         }
-        match name.as_str() {
-            "p" => blocks.push(Block::Paragraph(parse_paragraph(
-                &mut reader,
-                is_empty,
-                &ctx,
-            )?)),
-            "sectPr" => section = parse_sect_pr(&mut reader, is_empty)?,
-            other => {
-                let label = label_for(other).to_string();
-                let xml = capture(&mut reader, &e, is_empty)?;
-                blocks.push(Block::Opaque { label, xml });
-            }
-        }
+        parse_block(
+            &mut reader,
+            &e,
+            is_empty,
+            &ctx,
+            &mut blocks,
+            Some(&mut section),
+        )?;
     }
     Ok((blocks, section))
 }
@@ -515,6 +994,8 @@ pub fn read_package(pkg: &Package) -> Result<WordDocument> {
     };
     numbering::add_builtin_defs(&mut numbering);
 
+    let parts = crate::parts::read_parts(pkg, &main, &rels, &section)?;
+
     Ok(WordDocument {
         blocks,
         section,
@@ -522,5 +1003,10 @@ pub fn read_package(pkg: &Package) -> Result<WordDocument> {
         default_run,
         default_para,
         numbering,
+        notes: parts.notes,
+        comments: parts.comments,
+        headers: parts.headers,
+        sources: parts.sources,
+        settings: parts.settings,
     })
 }

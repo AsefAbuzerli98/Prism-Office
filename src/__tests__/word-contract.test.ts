@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { applyMarks, insertText, pos, splitParagraph, updateParagraphs } from "../word/ops";
-import { blankDocument, BULLET_NUM_ID, type WordDocument } from "../word/model";
+import { blankDocument, BULLET_NUM_ID, newTable, type Paragraph, type WordDocument } from "../word/model";
 
 /**
  * Contract between the TS editor and the Rust model: the document produced
@@ -21,8 +21,33 @@ function editedDocument(): WordDocument {
   r = splitParagraph(blocks, pos(1, 25), () => undefined);
   r = insertText(r.blocks, r.pos, "bullet", {});
   blocks = updateParagraphs(r.blocks, r.pos, r.pos, (p) => ({ ...p, list: { numId: BULLET_NUM_ID, level: 1 }, spaceAfter: 0, indentFirst: -360 }));
-  blocks = [...blocks, { type: "opaque", label: "Table", xml: '<w:tbl xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:tr><w:tc><w:p/></w:tc></w:tr></w:tbl>' }];
-  return { ...doc, blocks, section: { ...doc.section, landscape: true, pageWidth: 16838, pageHeight: 11906 } };
+  const table = newTable(2, 2);
+  table.rows[0]!.header = true;
+  table.rows[0]!.cells[0]!.shading = "DDEEFF";
+  table.rows[1]!.cells[1]!.blocks = [{ type: "paragraph", inlines: [{ type: "text", text: "cell", marks: { revision: { kind: "insert", id: "1", author: "Prism", date: "2026-11-12T00:00:00Z" } } }] }];
+  const extras: Paragraph = {
+    type: "paragraph",
+    bidi: true,
+    tabs: [{ pos: 9016, align: "right", leader: "." }],
+    inlines: [
+      { type: "comment", id: "0", edge: "start" },
+      { type: "text", text: "noted", marks: { rtl: true } },
+      { type: "comment", id: "0", edge: "end" },
+      { type: "comment", id: "0", edge: "reference" },
+      { type: "note", kind: "footnote", id: 1, xml: "" },
+      { type: "shape", preset: "ellipse", cx: 914400, cy: 457200, stroke: "1F2937", xml: "" },
+    ],
+  };
+  blocks = [...blocks, table, extras];
+  return {
+    ...doc,
+    blocks,
+    notes: [{ kind: "footnote", id: 1, blocks: [{ type: "paragraph", style: "FootnoteText", inlines: [{ type: "text", text: "A note", marks: {} }] }] }],
+    comments: [{ id: "0", author: "Prism", initials: "P", blocks: [{ type: "paragraph", inlines: [{ type: "text", text: "Check", marks: {} }] }] }],
+    sources: [{ tag: "Doe24", kind: "Report", title: "Docs", authors: ["Doe, J"], year: "2024", publisher: "", url: "" }],
+    settings: { trackRevisions: true, autoHyphenation: false },
+    section: { ...doc.section, landscape: true, pageWidth: 16838, pageHeight: 11906, columns: { count: 2, space: 720, separator: true } },
+  };
 }
 
 describe("TS ⇄ Rust document contract", () => {

@@ -104,6 +104,9 @@ pub(crate) fn rpr_xml(m: &Marks) -> String {
             format!(r#"<w:u w:val="{}"/>"#, if u { "single" } else { "none" }),
         );
     }
+    if let Some(r) = m.rtl {
+        add("rtl", on_off("rtl", r));
+    }
     if let Some(v) = m.vert_align {
         let v = match v {
             VertAlign::Superscript => "superscript",
@@ -176,6 +179,36 @@ fn ppr_xml(p: &Paragraph) -> String {
         s.push_str("/>");
         add("ind", s);
     }
+    if f.bidi {
+        add("bidi", "<w:bidi/>".into());
+    }
+    if !f.tabs.is_empty() {
+        let mut t = String::from("<w:tabs>");
+        for tab in &f.tabs {
+            let val = match tab.align {
+                TabAlign::Left => "left",
+                TabAlign::Center => "center",
+                TabAlign::Right => "right",
+                TabAlign::Decimal => "decimal",
+                TabAlign::Bar => "bar",
+                TabAlign::Clear => "clear",
+            };
+            let leader = match tab.leader {
+                Some('.') => r#" w:leader="dot""#,
+                Some('-') => r#" w:leader="hyphen""#,
+                Some('_') => r#" w:leader="underscore""#,
+                Some('·') => r#" w:leader="middleDot""#,
+                Some('━') => r#" w:leader="heavy""#,
+                _ => "",
+            };
+            t.push_str(&format!(
+                r#"<w:tab w:val="{val}"{leader} w:pos="{}"/>"#,
+                tab.pos
+            ));
+        }
+        t.push_str("</w:tabs>");
+        add("tabs", t);
+    }
     if let Some(a) = f.align {
         add("jc", format!(r#"<w:jc w:val="{}"/>"#, a.to_ooxml()));
     }
@@ -192,14 +225,15 @@ fn ppr_xml(p: &Paragraph) -> String {
     }
 }
 
-fn text_run(text: &str, marks: &Marks) -> String {
+fn text_run(text: &str, marks: &Marks, deleted: bool) -> String {
     let rpr = rpr_xml(marks);
+    let tag = if deleted { "w:delText" } else { "w:t" };
     let mut body = String::new();
     let mut buf = String::new();
     let flush = |buf: &mut String, body: &mut String| {
         if !buf.is_empty() {
             body.push_str(&format!(
-                r#"<w:t xml:space="preserve">{}</w:t>"#,
+                r#"<{tag} xml:space="preserve">{}</{tag}>"#,
                 escape_text(buf)
             ));
             buf.clear();
@@ -232,48 +266,241 @@ fn text_run(text: &str, marks: &Marks) -> String {
     format!("<w:r>{rpr}{body}</w:r>")
 }
 
-fn inline_xml(i: &Inline) -> String {
+const WP_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing";
+const A_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
+const PIC_NS: &str = "http://schemas.openxmlformats.org/drawingml/2006/picture";
+
+/// Set (or add) attribute `attr` on the first tag whose name ends with `tag`.
+fn set_attr(xml: &str, tag: &str, attr: &str, value: &str) -> String {
+    let Some(start) = xml
+        .find(&format!(":{tag} "))
+        .and_then(|i| xml[..i].rfind('<'))
+    else {
+        return xml.to_string();
+    };
+    let end = start + xml[start..].find('>').unwrap_or(0);
+    let tag_src = &xml[start..end];
+    let needle = format!(" {attr}=\"");
+    let new_tag = match tag_src.find(&needle) {
+        Some(i) => {
+            let vstart = i + needle.len();
+            let vend = vstart + tag_src[vstart..].find('"').unwrap_or(0);
+            format!(
+                "{}{}{}",
+                &tag_src[..vstart],
+                escape_attr(value),
+                &tag_src[vend..]
+            )
+        }
+        None => {
+            let insert = if tag_src.ends_with('/') {
+                tag_src.len() - 1
+            } else {
+                tag_src.len()
+            };
+            format!(
+                "{} {attr}=\"{}\"{}",
+                tag_src[..insert].trim_end(),
+                escape_attr(value),
+                &tag_src[insert..]
+            )
+        }
+    };
+    format!("{}{}{}", &xml[..start], new_tag, &xml[end..])
+}
+
+static DOC_PR_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(5000);
+
+fn image_xml(rel_id: &str, cx: u64, cy: u64, descr: &str, xml: &str) -> String {
+    let rel_id = rel_id.split_once('#').map_or(rel_id, |(_, id)| id);
+    if !xml.is_empty() {
+        let mut x = set_attr(xml, "docPr", "descr", descr);
+        x = set_attr(&x, "extent", "cx", &cx.to_string());
+        x = set_attr(&x, "extent", "cy", &cy.to_string());
+        if let Some(i) = x.find(":xfrm") {
+            let (head, tail) = x.split_at(i);
+            let tail = set_attr(
+                &set_attr(tail, "ext", "cx", &cx.to_string()),
+                "ext",
+                "cy",
+                &cy.to_string(),
+            );
+            x = format!("{head}{tail}");
+        }
+        return x;
+    }
+    let id = DOC_PR_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!(
+        r#"<w:r><w:drawing><wp:inline xmlns:wp="{WP_NS}" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="{cx}" cy="{cy}"/><wp:docPr id="{id}" name="Picture {id}" descr="{d}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="{A_NS}" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="{A_NS}"><a:graphicData uri="{PIC_NS}"><pic:pic xmlns:pic="{PIC_NS}"><pic:nvPicPr><pic:cNvPr id="0" name="Picture {id}" descr="{d}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="{rel_id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"#,
+        d = escape_attr(descr)
+    )
+}
+
+const WPS_NS: &str = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape";
+
+fn shape_xml(
+    preset: &str,
+    cx: u64,
+    cy: u64,
+    stroke: &str,
+    fill: Option<&str>,
+    xml: &str,
+) -> String {
+    if !xml.is_empty() {
+        return xml.to_string();
+    }
+    let id = DOC_PR_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let fill = match fill {
+        Some(f) => format!(
+            r#"<a:solidFill><a:srgbClr val="{}"/></a:solidFill>"#,
+            escape_attr(f)
+        ),
+        None => "<a:noFill/>".into(),
+    };
+    let stroke = if stroke.is_empty() { "1F2937" } else { stroke };
+    format!(
+        r#"<w:r><w:drawing><wp:inline xmlns:wp="{WP_NS}" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="{cx}" cy="{cy}"/><wp:docPr id="{id}" name="Shape {id}"/><a:graphic xmlns:a="{A_NS}"><a:graphicData uri="{WPS_NS}"><wps:wsp xmlns:wps="{WPS_NS}"><wps:cNvSpPr/><wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="{p}"><a:avLst/></a:prstGeom>{fill}<a:ln w="19050"><a:solidFill><a:srgbClr val="{s}"/></a:solidFill></a:ln></wps:spPr><wps:bodyPr/></wps:wsp></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"#,
+        p = escape_attr(preset),
+        s = escape_attr(stroke)
+    )
+}
+
+fn inline_xml(i: &Inline, deleted: bool) -> String {
     match i {
-        Inline::Text { text, marks } => text_run(text, marks),
+        Inline::Text { text, marks } => text_run(text, marks, deleted),
         Inline::Tab { marks } => format!("<w:r>{}<w:tab/></w:r>", rpr_xml(marks)),
         Inline::Break { kind } => match kind {
             BreakKind::Line => "<w:r><w:br/></w:r>".into(),
             BreakKind::Page => r#"<w:r><w:br w:type="page"/></w:r>"#.into(),
             BreakKind::Column => r#"<w:r><w:br w:type="column"/></w:r>"#.into(),
         },
+        Inline::Image {
+            rel_id,
+            cx,
+            cy,
+            descr,
+            xml,
+        } => image_xml(rel_id, *cx, *cy, descr, xml),
+        Inline::Shape {
+            preset,
+            cx,
+            cy,
+            stroke,
+            fill,
+            xml,
+        } => shape_xml(preset, *cx, *cy, stroke, fill.as_deref(), xml),
+        Inline::Note { kind, id, xml } => {
+            if !xml.is_empty() {
+                return xml.clone();
+            }
+            let (style, el) = match kind {
+                NoteKind::Footnote => ("FootnoteReference", "footnoteReference"),
+                NoteKind::Endnote => ("EndnoteReference", "endnoteReference"),
+            };
+            format!(
+                r#"<w:r><w:rPr><w:rStyle w:val="{style}"/><w:vertAlign w:val="superscript"/></w:rPr><w:{el} w:id="{id}"/></w:r>"#
+            )
+        }
+        Inline::Comment { id, edge } => {
+            let id = escape_attr(id);
+            match edge {
+                CommentEdge::Start => format!(r#"<w:commentRangeStart w:id="{id}"/>"#),
+                CommentEdge::End => format!(r#"<w:commentRangeEnd w:id="{id}"/>"#),
+                CommentEdge::Reference => format!(
+                    r#"<w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="{id}"/></w:r>"#
+                ),
+            }
+        }
         Inline::Opaque { xml, .. } => xml.clone(),
     }
 }
 
-fn link_of(i: &Inline) -> Option<&str> {
+fn marks_of(i: &Inline) -> Option<&Marks> {
     match i {
-        Inline::Text { marks, .. } | Inline::Tab { marks } => marks.link.as_deref(),
+        Inline::Text { marks, .. } | Inline::Tab { marks } => Some(marks),
         _ => None,
     }
 }
 
-fn strip_link(i: &Inline) -> Inline {
+fn link_of(i: &Inline) -> Option<&str> {
+    marks_of(i).and_then(|m| m.link.as_deref())
+}
+
+fn revision_of(i: &Inline) -> Option<&Revision> {
+    marks_of(i).and_then(|m| m.revision.as_ref())
+}
+
+fn strip(i: &Inline, link: bool, revision: bool) -> Inline {
     let mut i = i.clone();
     if let Inline::Text { marks, .. } | Inline::Tab { marks } = &mut i {
-        marks.link = None;
+        if link {
+            marks.link = None;
+        }
+        if revision {
+            marks.revision = None;
+        }
     }
     i
 }
 
+/// Inlines grouped into `w:ins`/`w:del` wrappers by revision.
+fn revision_groups(inlines: &[Inline]) -> String {
+    let mut s = String::new();
+    let mut i = 0;
+    while i < inlines.len() {
+        match revision_of(&inlines[i]).cloned() {
+            None => {
+                s.push_str(&inline_xml(&inlines[i], false));
+                i += 1;
+            }
+            Some(rev) => {
+                let mut j = i;
+                let mut inner = String::new();
+                let deleted = rev.kind == RevisionKind::Delete;
+                while j < inlines.len() && revision_of(&inlines[j]) == Some(&rev) {
+                    inner.push_str(&inline_xml(&strip(&inlines[j], false, true), deleted));
+                    j += 1;
+                }
+                let tag = if deleted { "w:del" } else { "w:ins" };
+                let date = rev
+                    .date
+                    .as_ref()
+                    .map(|d| format!(r#" w:date="{}""#, escape_attr(d)))
+                    .unwrap_or_default();
+                s.push_str(&format!(
+                    r#"<{tag} w:id="{}" w:author="{}"{date}>{inner}</{tag}>"#,
+                    escape_attr(&rev.id),
+                    escape_attr(&rev.author)
+                ));
+                i = j;
+            }
+        }
+    }
+    s
+}
+
 fn paragraph_xml(p: &Paragraph, link_id: &mut dyn FnMut(&str) -> String) -> String {
-    let mut s = format!("<w:p>{}", ppr_xml(p));
+    let ppr = ppr_xml(p);
+    if ppr.is_empty() && p.inlines.is_empty() {
+        return "<w:p/>".into();
+    }
+    let mut s = format!("<w:p>{ppr}");
     let mut i = 0;
     while i < p.inlines.len() {
         match link_of(&p.inlines[i]) {
             None => {
-                s.push_str(&inline_xml(&p.inlines[i]));
-                i += 1;
+                let mut j = i;
+                while j < p.inlines.len() && link_of(&p.inlines[j]).is_none() {
+                    j += 1;
+                }
+                s.push_str(&revision_groups(&p.inlines[i..j]));
+                i = j;
             }
             Some(target) => {
                 let mut j = i;
-                let mut inner = String::new();
+                let mut inner = Vec::new();
                 while j < p.inlines.len() && link_of(&p.inlines[j]) == Some(target) {
-                    inner.push_str(&inline_xml(&strip_link(&p.inlines[j])));
+                    inner.push(strip(&p.inlines[j], true, false));
                     j += 1;
                 }
                 let open = match target.strip_prefix('#') {
@@ -281,13 +508,122 @@ fn paragraph_xml(p: &Paragraph, link_id: &mut dyn FnMut(&str) -> String) -> Stri
                     None => format!(r#"<w:hyperlink r:id="{}">"#, link_id(target)),
                 };
                 s.push_str(&open);
-                s.push_str(&inner);
+                s.push_str(&revision_groups(&inner));
                 s.push_str("</w:hyperlink>");
                 i = j;
             }
         }
     }
     s.push_str("</w:p>");
+    s
+}
+
+const TCPR: &[&str] = &[
+    "cnfStyle",
+    "tcW",
+    "gridSpan",
+    "hMerge",
+    "vMerge",
+    "tcBorders",
+    "shd",
+    "noWrap",
+    "tcMar",
+    "textDirection",
+    "tcFitText",
+    "vAlign",
+    "hideMark",
+    "headers",
+    "cellIns",
+    "cellDel",
+    "cellMerge",
+    "tcPrChange",
+];
+
+const NEW_TABLE_PR: &str = r#"<w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="auto"/></w:tblBorders><w:tblLayout w:type="fixed"/><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="1" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr>"#;
+
+fn table_xml(t: &Table, link_id: &mut dyn FnMut(&str) -> String) -> String {
+    let mut s = String::from("<w:tbl>");
+    match &t.props {
+        Some(p) => s.push_str(p),
+        None if t.borders => s.push_str(NEW_TABLE_PR),
+        None => s.push_str(
+            r#"<w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblLayout w:type="fixed"/></w:tblPr>"#,
+        ),
+    }
+    s.push_str("<w:tblGrid>");
+    for w in &t.grid {
+        s.push_str(&format!(r#"<w:gridCol w:w="{w}"/>"#));
+    }
+    s.push_str("</w:tblGrid>");
+    for row in &t.rows {
+        s.push_str("<w:tr>");
+        let mut trpr = row.props.clone().unwrap_or_default();
+        if row.header {
+            trpr = if trpr.is_empty() {
+                "<w:trPr><w:tblHeader/></w:trPr>".into()
+            } else {
+                trpr.replacen("</w:trPr>", "<w:tblHeader/></w:trPr>", 1)
+            };
+        }
+        s.push_str(&trpr);
+        for c in &row.cells {
+            let mut parts: Vec<(String, String)> = c
+                .extra
+                .iter()
+                .map(|e| (e.name.clone(), e.xml.clone()))
+                .collect();
+            if let Some(w) = c.width {
+                parts.push(("tcW".into(), format!(r#"<w:tcW w:w="{w}" w:type="dxa"/>"#)));
+            }
+            if c.span > 1 {
+                parts.push((
+                    "gridSpan".into(),
+                    format!(r#"<w:gridSpan w:val="{}"/>"#, c.span),
+                ));
+            }
+            match c.v_merge {
+                Some(VMerge::Restart) => {
+                    parts.push(("vMerge".into(), r#"<w:vMerge w:val="restart"/>"#.into()))
+                }
+                Some(VMerge::Continue) => parts.push(("vMerge".into(), "<w:vMerge/>".into())),
+                None => {}
+            }
+            if let Some(fill) = &c.shading {
+                parts.push((
+                    "shd".into(),
+                    format!(
+                        r#"<w:shd w:val="clear" w:color="auto" w:fill="{}"/>"#,
+                        escape_attr(fill)
+                    ),
+                ));
+            }
+            s.push_str("<w:tc>");
+            if !parts.is_empty() {
+                s.push_str(&format!("<w:tcPr>{}</w:tcPr>", sorted(TCPR, parts)));
+            }
+            let mut blocks = c.blocks.clone();
+            if !matches!(blocks.last(), Some(Block::Paragraph(_))) {
+                blocks.push(Block::Paragraph(Paragraph::default()));
+            }
+            s.push_str(&blocks_xml(&blocks, link_id));
+            s.push_str("</w:tc>");
+        }
+        s.push_str("</w:tr>");
+    }
+    s.push_str("</w:tbl>");
+    s
+}
+
+/// Serialise block content (body, cells, notes, comments, headers).
+pub(crate) fn blocks_xml(blocks: &[Block], link_id: &mut dyn FnMut(&str) -> String) -> String {
+    let mut s = String::new();
+    for b in blocks {
+        match b {
+            Block::Paragraph(p) => s.push_str(&paragraph_xml(p, link_id)),
+            Block::Table(t) => s.push_str(&table_xml(t, link_id)),
+            Block::Opaque { xml, .. } => s.push_str(xml),
+        }
+    }
     s
 }
 
@@ -304,6 +640,16 @@ fn sect_xml(sec: &Section) -> String {
         .filter(|e| e.name != "w:gutter")
         .map(|e| (e.name.clone(), e.xml.clone()))
         .collect();
+    if let Some(c) = &sec.columns {
+        let sep = if c.separator { r#" w:sep="1""# } else { "" };
+        parts.push((
+            "cols".into(),
+            format!(
+                r#"<w:cols w:num="{}" w:space="{}"{sep}/>"#,
+                c.count, c.space
+            ),
+        ));
+    }
     let orient = if sec.landscape {
         r#" w:orient="landscape""#
     } else {
@@ -334,15 +680,12 @@ pub fn write_document_xml(
     link_id: &mut dyn FnMut(&str) -> String,
 ) -> String {
     let mut s = document_prefix(original);
-    for b in &doc.blocks {
-        match b {
-            Block::Paragraph(p) => s.push_str(&paragraph_xml(p, link_id)),
-            Block::Opaque { xml, .. } => s.push_str(xml),
-        }
-    }
+    s.push_str(&blocks_xml(&doc.blocks, link_id));
     // A body must end with a paragraph before sectPr if the last block is a table.
-    if matches!(doc.blocks.last(), Some(Block::Opaque { label, .. }) if label == "Table")
-        || doc.blocks.is_empty()
+    if matches!(
+        doc.blocks.last(),
+        Some(Block::Table(_)) | Some(Block::Opaque { .. })
+    ) || doc.blocks.is_empty()
     {
         s.push_str("<w:p/>");
     }
@@ -382,14 +725,33 @@ fn insertion_points(xml: &str, child: &str) -> Option<(Option<usize>, usize)> {
     }
 }
 
+/// Every paragraph in the document, including table cells, notes, comments and headers.
+fn all_paragraphs(doc: &WordDocument) -> Vec<&Paragraph> {
+    fn walk<'a>(blocks: &'a [Block], out: &mut Vec<&'a Paragraph>) {
+        for b in blocks {
+            match b {
+                Block::Paragraph(p) => out.push(p),
+                Block::Table(t) => t
+                    .rows
+                    .iter()
+                    .flat_map(|r| &r.cells)
+                    .for_each(|c| walk(&c.blocks, out)),
+                Block::Opaque { .. } => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&doc.blocks, &mut out);
+    doc.notes.iter().for_each(|n| walk(&n.blocks, &mut out));
+    doc.comments.iter().for_each(|c| walk(&c.blocks, &mut out));
+    doc.headers.iter().for_each(|h| walk(&h.blocks, &mut out));
+    out
+}
+
 fn ensure_numbering(pkg: &mut Package, main: &PartName, doc: &WordDocument) -> Result<()> {
-    let mut used: Vec<u32> = doc
-        .blocks
-        .iter()
-        .filter_map(|b| match b {
-            Block::Paragraph(p) => p.list.map(|l| l.num_id),
-            _ => None,
-        })
+    let mut used: Vec<u32> = all_paragraphs(doc)
+        .into_iter()
+        .filter_map(|p| p.list.map(|l| l.num_id))
         .filter(|id| numbering::builtin_xml(*id).is_some())
         .collect();
     used.sort_unstable();
@@ -457,10 +819,9 @@ fn ensure_styles(pkg: &mut Package, main: &PartName, doc: &WordDocument) -> Resu
     let (_, _, existing) = styles::parse_styles(xml.as_bytes())?;
     let mut add = String::new();
     for id in styles::BUILTIN_IDS {
-        let used = doc
-            .blocks
+        let used = all_paragraphs(doc)
             .iter()
-            .any(|b| matches!(b, Block::Paragraph(p) if p.style.as_deref() == Some(id)));
+            .any(|p| p.style.as_deref() == Some(id));
         if used && !existing.iter().any(|s| s.id == *id) {
             add.push_str(&styles::builtin_style_xml(id).unwrap());
         }
@@ -496,5 +857,6 @@ pub fn write_package(pkg: &mut Package, doc: &WordDocument) -> Result<()> {
     pkg.set_part(main.clone(), xml.into_bytes(), ct.as_deref());
     ensure_numbering(pkg, &main, doc)?;
     ensure_styles(pkg, &main, doc)?;
+    crate::parts::write_parts(pkg, &main, doc)?;
     Ok(())
 }

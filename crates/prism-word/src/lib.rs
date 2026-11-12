@@ -8,14 +8,17 @@
 //! XML (`Opaque` blocks/inlines and `extra` property lists) so that saving a
 //! document never drops content the editor does not yet support.
 
+pub mod media;
 mod model;
 mod numbering;
 mod order;
+mod parts;
 mod raw;
 mod read;
 mod styles;
 mod write;
 
+pub use media::{add_image, embedded_fonts, image_data, EmbeddedFont};
 pub use model::*;
 pub use read::{read_document, read_package};
 pub use write::{write_document_xml, write_package};
