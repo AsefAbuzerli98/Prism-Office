@@ -382,7 +382,9 @@ fn utf8_len(b: u8) -> usize {
 /// Strip Excel's future-function prefixes (`_xlfn.`, `_xlws.`, `_xlpm.`).
 pub fn strip_prefixes(name: &str) -> &str {
     let mut n = name;
-    for p in ["_xlfn.", "_xlws.", "_xlpm.", "_XLFN.", "_XLWS.", "_XLPM."] {
+    for p in [
+        "_xlfn.", "_xlws.", "_xlpm.", "_xleta.", "_XLFN.", "_XLWS.", "_XLPM.", "_XLETA.",
+    ] {
         if let Some(rest) = n.strip_prefix(p) {
             n = rest;
         }
@@ -932,8 +934,13 @@ fn num_text(n: f64) -> String {
 
 /// Serialise an expression back to formula text (without `=`).
 pub fn to_formula(e: &Expr, o: &WriteOptions) -> String {
+    fmt(e, o, &[])
+}
+
+/// `scope`: LET/LAMBDA parameter names visible at this point.
+fn fmt(e: &Expr, o: &WriteOptions, scope: &[String]) -> String {
     let wrap = |child: &Expr, min: u8| {
-        let s = to_formula(child, o);
+        let s = fmt(child, o, scope);
         if prec(child) < min {
             format!("({s})")
         } else {
@@ -950,13 +957,21 @@ pub fn to_formula(e: &Expr, o: &WriteOptions) -> String {
             rows.iter()
                 .map(|r| r
                     .iter()
-                    .map(|x| to_formula(x, o))
+                    .map(|x| fmt(x, o, scope))
                     .collect::<Vec<_>>()
                     .join(","))
                 .collect::<Vec<_>>()
                 .join(";")
         ),
         Expr::Ref(r) => ref_text(r, o),
+        Expr::Name(n) if o.file_prefixes && scope.iter().any(|p| p.eq_ignore_ascii_case(n)) => {
+            format!("_xlpm.{n}")
+        }
+        Expr::Name(n)
+            if o.file_prefixes && crate::functions::is_builtin(&n.to_ascii_uppercase()) =>
+        {
+            format!("_xleta.{}", n.to_ascii_uppercase())
+        }
         Expr::Name(n) => n.clone(),
         Expr::Unary(op, x) => match op {
             UnOp::Neg => format!("-{}", wrap(x, 7)),
@@ -1004,10 +1019,19 @@ pub fn to_formula(e: &Expr, o: &WriteOptions) -> String {
             } else {
                 vec![]
             };
-            let parts: Vec<String> = args
-                .iter()
-                .enumerate()
-                .map(|(i, a)| match a {
+            let mut inner: Vec<String> = scope.to_vec();
+            if name == "LAMBDA" {
+                inner.extend(lambda_params.iter().filter_map(|p| {
+                    if let Expr::Name(n) = p {
+                        Some(n.clone())
+                    } else {
+                        None
+                    }
+                }));
+            }
+            let mut parts: Vec<String> = Vec::with_capacity(args.len());
+            for (i, a) in args.iter().enumerate() {
+                parts.push(match a {
                     Expr::Name(n)
                         if o.file_prefixes
                             && (i < lambda_params.len() || let_params.contains(&i)) =>
@@ -1015,20 +1039,25 @@ pub fn to_formula(e: &Expr, o: &WriteOptions) -> String {
                         format!("_xlpm.{n}")
                     }
                     Expr::Missing => String::new(),
-                    _ => to_formula(a, o),
-                })
-                .collect();
+                    _ => fmt(a, o, &inner),
+                });
+                if let_params.contains(&i) {
+                    if let Expr::Name(n) = a {
+                        inner.push(n.clone());
+                    }
+                }
+            }
             format!("{shown}({})", parts.join(","))
         }
         Expr::Invoke(f, args) => format!(
             "{}({})",
-            to_formula(f, o),
+            fmt(f, o, scope),
             args.iter()
-                .map(|a| to_formula(a, o))
+                .map(|a| fmt(a, o, scope))
                 .collect::<Vec<_>>()
                 .join(",")
         ),
-        Expr::Spill(x) => format!("{}#", to_formula(x, o)),
+        Expr::Spill(x) => format!("{}#", fmt(x, o, scope)),
         Expr::Structured { table, spec } => {
             format!("{}[{}]", table.clone().unwrap_or_default(), spec)
         }
@@ -1146,7 +1175,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(s, "_xlfn.LET(_xlpm.x,1,_xlfn.LAMBDA(_xlpm.y,_xlfn.XLOOKUP(y,A:A,B:B))(x))+_xlfn._xlws.SORT(A1:A3)");
+        assert_eq!(s, "_xlfn.LET(_xlpm.x,1,_xlfn.LAMBDA(_xlpm.y,_xlfn.XLOOKUP(_xlpm.y,A:A,B:B))(_xlpm.x))+_xlfn._xlws.SORT(A1:A3)");
         // and reading it back strips them
         assert_eq!(
             to_formula(

@@ -9,10 +9,13 @@ pub mod addr;
 pub mod calc;
 pub mod eval;
 pub mod functions;
+pub mod model;
 pub mod numfmt;
 pub mod parser;
 pub mod value;
 pub mod workbook;
+#[cfg(feature = "xlsx")]
+pub mod xlsx;
 
 pub use addr::{CellRef, Rect};
 pub use parser::{parse, Expr};

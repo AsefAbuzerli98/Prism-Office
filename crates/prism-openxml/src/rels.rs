@@ -93,6 +93,17 @@ impl Relationships {
         self.items.is_empty()
     }
 
+    /// Append a relationship as-is (keeps its id).
+    pub fn push(&mut self, r: Relationship) {
+        self.items.push(r);
+    }
+
+    /// Remove a relationship by id.
+    pub fn remove(&mut self, id: &str) -> Option<Relationship> {
+        let i = self.items.iter().position(|r| r.id == id)?;
+        Some(self.items.remove(i))
+    }
+
     pub fn by_id(&self, id: &str) -> Option<&Relationship> {
         self.items.iter().find(|r| r.id == id)
     }

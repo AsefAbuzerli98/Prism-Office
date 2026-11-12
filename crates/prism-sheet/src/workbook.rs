@@ -54,6 +54,8 @@ pub struct Sheet {
     /// Frozen rows/columns (top-left split).
     pub frozen: (u32, u32),
     pub hidden: bool,
+    /// Index of the worksheet in the source file (XLSX round-trip).
+    pub source: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -181,6 +181,14 @@ impl fmt::Display for Value {
 }
 
 /// General number format: up to 15 significant digits, no trailing zeros.
+/// Shortest decimal text that parses back to exactly `n` (file storage).
+pub fn format_number_roundtrip(n: f64) -> String {
+    if n == n.trunc() && n.abs() < 1e15 {
+        return format!("{}", n as i64);
+    }
+    format!("{n}")
+}
+
 pub fn format_number(n: f64) -> String {
     if n == 0.0 {
         return "0".into();
