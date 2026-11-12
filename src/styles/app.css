@@ -239,3 +239,16 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .picker-item:hover, .picker-item:focus-visible { background: var(--bg); outline: none; }
 .picker-item.selected { background: var(--accent-soft); color: var(--accent-strong); }
+
+/* ---- Comments side panel, forms -------------------------------------------- */
+.word-editor.with-side { grid-template-columns: 1fr 280px; }
+.word-editor.split.with-side { grid-template-columns: 1fr minmax(260px, 35%) 280px; }
+.word-side { border-inline-start: 1px solid var(--border); background: var(--surface); overflow: auto; padding: 12px; }
+.side-title { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.comment-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 8px; background: var(--bg); }
+.comment-head { display: flex; align-items: center; gap: 6px; cursor: pointer; margin-bottom: 6px; }
+.comment-avatar { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--accent-contrast); font-size: 10px; font-weight: 700; }
+.comment-text { width: 100%; resize: vertical; border: 1px solid var(--border); border-radius: 6px; padding: 6px; font: inherit; background: var(--surface); color: var(--text); }
+.form-row { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 8px; }
+.source-item { display: flex; justify-content: space-between; gap: 8px; }
+.sources-list { max-height: 160px; overflow: auto; margin-bottom: 12px; }

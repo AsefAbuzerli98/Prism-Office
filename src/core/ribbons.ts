@@ -77,6 +77,27 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
       ],
     },
     {
+      id: "insert",
+      label: "Insert",
+      groups: [
+        {
+          id: "tables",
+          label: "Tables",
+          commands: [cmd("doc.table", "Table", "▦", 2), cmd("doc.tableTools", "Table Tools", "⊞", 2)],
+        },
+        {
+          id: "illustrations",
+          label: "Illustrations",
+          commands: [cmd("doc.picture", "Picture", "🖼", 2), cmd("doc.pictureTools", "Picture Tools", "⤢", 2), cmd("doc.ink", "Ink", "✎", 2)],
+        },
+        {
+          id: "header-footer",
+          label: "Header & Footer",
+          commands: [cmd("doc.header", "Header", "▔", 2), cmd("doc.footer", "Footer", "▁", 2), cmd("doc.pageBreak", "Page Break", "⤓", 2)],
+        },
+      ],
+    },
+    {
       id: "page-setup",
       label: "Page Setup",
       groups: [
@@ -86,25 +107,67 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
           commands: [
             cmd("doc.margins", "Margins", "▭", 2),
             cmd("doc.orientation", "Orientation", "⟲", 2),
-            cmd("doc.pageBreak", "Page Break", "⤓", 2),
             cmd("doc.columns", "Columns", "▥", 2),
           ],
+        },
+        {
+          id: "text-flow",
+          label: "Text Flow",
+          commands: [cmd("doc.hyphenation", "Hyphenation", "‐", 2), cmd("doc.rtl", "Right-to-Left", "⇤", 2)],
         },
       ],
     },
     {
       id: "citations",
-      label: "Citations",
+      label: "References",
       groups: [
         {
+          id: "notes",
+          label: "Notes",
+          commands: [cmd("doc.footnote", "Footnote", "¹", 2), cmd("doc.endnote", "Endnote", "ⁱ", 2)],
+        },
+        {
           id: "sources",
-          label: "Sources",
+          label: "Citations",
           commands: [
-            cmd("doc.footnote", "Footnote", "¹", 2),
             cmd("doc.citation", "Citation", "❝", 2),
+            cmd("doc.sources", "Sources", "📚", 2),
             cmd("doc.bibliography", "Bibliography", "☰", 2),
           ],
         },
+        {
+          id: "toc",
+          label: "Contents",
+          commands: [cmd("doc.toc", "Contents", "⋮", 2), cmd("doc.updateFields", "Update Fields", "↻", 2)],
+        },
+      ],
+    },
+    {
+      id: "review",
+      label: "Review",
+      groups: [
+        {
+          id: "tracking",
+          label: "Tracking",
+          commands: [cmd("doc.trackChanges", "Track Changes", "✎", 2), cmd("doc.markup", "Show Markup", "◐", 2)],
+        },
+        {
+          id: "changes",
+          label: "Changes",
+          commands: [
+            cmd("doc.accept", "Accept", "✓", 2),
+            cmd("doc.reject", "Reject", "✗", 2),
+            cmd("doc.acceptAll", "Accept All", "✓✓", 2),
+            cmd("doc.rejectAll", "Reject All", "✗✗", 2),
+            cmd("doc.nextChange", "Next", "→", 2),
+          ],
+        },
+        {
+          id: "comments",
+          label: "Comments",
+          commands: [cmd("doc.comment", "New Comment", "💬", 2), cmd("doc.comments", "Comments Pane", "🗨", 2)],
+        },
+        { id: "check", label: "Check", commands: [cmd("doc.accessibility", "Accessibility", "♿", 2)] },
       ],
     },
     {
@@ -114,13 +177,13 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
         {
           id: "structure",
           label: "Structure",
-          commands: [
-            cmd("doc.toc", "Contents", "⋮", 2),
-            cmd("doc.markdown", "Markdown View", "M↓", 2),
-            cmd("doc.accessibility", "Accessibility", "♿", 2),
-          ],
+          commands: [cmd("doc.markdown", "Markdown View", "M↓", 2)],
         },
-        { id: "ai", label: "AI Agent", commands: [cmd("doc.agent", "Draft with Agent", "✦", 2)] },
+        {
+          id: "ai",
+          label: "AI Agent",
+          commands: [cmd("doc.agent", "Draft with Agent", "✦", 2), cmd("doc.rewrite", "Rewrite", "✎", 2), cmd("doc.aiSettings", "AI Settings", "⚙", 2)],
+        },
       ],
     },
   ],

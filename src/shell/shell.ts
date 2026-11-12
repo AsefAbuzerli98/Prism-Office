@@ -11,6 +11,10 @@ import { renderEngineView } from "../modes/views";
 import { WordEditor, type EngineView } from "../word/editor";
 import { IMPLEMENTED_PHASE } from "../core/ribbons";
 import { openPicker } from "./picker";
+import { openSourcesDialog } from "./sources-dialog";
+import { isCollapsed } from "../word/ops";
+
+const isCollapsedSel = (ed: WordEditor) => isCollapsed(ed.selection);
 import { CommandPalette } from "./palette";
 import { renderRibbon } from "./ribbon";
 import { openSettings } from "./settings";
@@ -259,6 +263,25 @@ export class Shell {
       simple("doc.pageBreak", "pageBreak"),
       { ...simple("doc.markdown", "markdown"), hidden: false, keys: ["Mod+Shift+M"] },
       { ...simple("doc.orientation", "orientation") },
+      simple("doc.picture", "insertImage"),
+      simple("doc.header", "header"),
+      simple("doc.footer", "footer"),
+      simple("doc.hyphenation", "hyphenation"),
+      simple("doc.rtl", "rtl"),
+      simple("doc.footnote", "footnote"),
+      simple("doc.endnote", "endnote"),
+      simple("doc.bibliography", "bibliography"),
+      { ...simple("doc.toc", "toc"), hidden: false },
+      { ...simple("doc.updateFields", "updateFields"), hidden: false, keys: ["F9"] },
+      { ...simple("doc.trackChanges", "trackChanges"), hidden: false, keys: ["Mod+Shift+E"] },
+      simple("doc.markup", "markup"),
+      simple("doc.accept", "accept"),
+      simple("doc.reject", "reject"),
+      simple("doc.acceptAll", "acceptAll"),
+      simple("doc.rejectAll", "rejectAll"),
+      simple("doc.nextChange", "nextChange"),
+      simple("doc.comments", "comments"),
+      { ...simple("doc.comment", "comment"), when: () => !!this.activeEditor?.doc && !isCollapsedSel(this.activeEditor), keys: ["Mod+Alt+M"] },
     );
   }
 
@@ -300,6 +323,59 @@ export class Shell {
         );
         return true;
       }
+      case "doc.table":
+        openPicker(
+          anchor,
+          ["2x2", "2x3", "3x3", "3x4", "4x4", "5x5", "6x6", "8x4"].map((v) => ({ value: v, label: v.replace("x", " × ") })),
+          (v) => ed.execute("insertTable", v),
+          t("word.insertTable"),
+        );
+        return true;
+      case "doc.tableTools":
+        openPicker(
+          anchor,
+          [
+            ["rowAbove", "word.rowAbove"], ["rowBelow", "word.rowBelow"], ["colLeft", "word.colLeft"], ["colRight", "word.colRight"],
+            ["deleteRow", "word.deleteRow"], ["deleteColumn", "word.deleteColumn"], ["mergeRight", "word.mergeRight"], ["splitCell", "word.splitCell"],
+            ["headerRow", "word.headerRow"], ["tableBorders", "word.tableBorders"], ["shade:DBEAFE", "word.shadeBlue"], ["shade:FEF3C7", "word.shadeYellow"],
+            ["shade:", "word.shadeNone"], ["deleteTable", "word.deleteTable"],
+          ].map(([v, k]) => ({ value: v!, label: t(k!) })),
+          (v) => (v.startsWith("shade:") ? ed.execute("cellShading", v.slice(6)) : ed.execute(v)),
+          t("ribbon.cmd.doc.tableTools", {}, "Table Tools"),
+        );
+        return true;
+      case "doc.pictureTools":
+        openPicker(
+          anchor,
+          [
+            { value: "scale:0.5", label: "50%" }, { value: "scale:0.75", label: "75%" }, { value: "scale:1.25", label: "125%" }, { value: "scale:1.5", label: "150%" },
+            { value: "alt", label: t("word.altText") },
+          ],
+          (v) => {
+            if (v === "alt") {
+              const cur = st.object?.type === "image" ? st.object.descr : "";
+              const text = window.prompt(t("word.altText"), cur);
+              if (text !== null) ed.execute("altText", text);
+            } else ed.execute("imageScale", v.slice(6));
+          },
+          t("ribbon.cmd.doc.pictureTools", {}, "Picture Tools"),
+        );
+        return true;
+      case "doc.columns":
+        openPicker(anchor, [1, 2, 3].map((n) => ({ value: String(n), label: String(n), selected: st.columns === n })), (v) => ed.execute("columns", v), t("ribbon.cmd.doc.columns", {}, "Columns"));
+        return true;
+      case "doc.sources":
+        openSourcesDialog(this.root, ed.doc.sources ?? [], (s) => ed.saveSource(s), (tag) => ed.removeSource(tag));
+        return true;
+      case "doc.citation": {
+        const sources = ed.doc.sources ?? [];
+        if (!sources.length) {
+          openSourcesDialog(this.root, [], (s) => ed.saveSource(s), (tag) => ed.removeSource(tag));
+          return true;
+        }
+        openPicker(anchor, sources.map((s) => ({ value: s.tag, label: `${s.authors[0] ?? s.title} (${s.year || "n.d."})` })), (v) => ed.execute("citation", v), t("ribbon.cmd.doc.citation", {}, "Citation"));
+        return true;
+      }
       case "doc.margins":
         openPicker(
           anchor,
@@ -324,7 +400,9 @@ export class Shell {
 
   private ribbonEnabled = (id: string, phase: number) => {
     if (this.commands.has(id)) return this.commands.isEnabled(id);
-    if (["doc.styles", "doc.font", "doc.margins", "doc.orientation"].includes(id)) return this.activeEditor?.doc != null;
+    if (id === "doc.tableTools") return !!this.activeEditor?.state().inTable;
+    if (id === "doc.pictureTools") return !!this.activeEditor?.state().object;
+    if (["doc.styles", "doc.font", "doc.margins", "doc.orientation", "doc.table", "doc.columns", "doc.sources", "doc.citation"].includes(id)) return this.activeEditor?.doc != null;
     return phase <= IMPLEMENTED_PHASE;
   };
 
@@ -340,6 +418,12 @@ export class Shell {
       case "doc.bullets": return st.list === 9001;
       case "doc.numbering": return st.list === 9002;
       case "doc.markdown": return ed.markdownVisible;
+      case "doc.trackChanges": return st.tracking;
+      case "doc.markup": return st.showMarkup;
+      case "doc.hyphenation": return st.hyphenation;
+      case "doc.rtl": return st.rtl;
+      case "doc.header": return st.container === "header";
+      case "doc.comments": return !ed.side.hidden;
       default: return false;
     }
   };
