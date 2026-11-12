@@ -68,6 +68,15 @@ impl ServiceRegistry {
         });
     }
 
+    /// Replace a registered service with the same id (e.g. a real implementation of a planned one).
+    pub fn replace(&mut self, service: Arc<dyn Service>) {
+        if let Some(slot) = self.services.iter_mut().find(|s| s.id() == service.id()) {
+            *slot = service;
+        } else {
+            self.register(service);
+        }
+    }
+
     pub fn start_all(&self, bus: &EventBus) {
         for svc in &self.services {
             let state = match svc.start(bus) {

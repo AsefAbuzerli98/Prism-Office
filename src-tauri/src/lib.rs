@@ -4,6 +4,7 @@
 //! registry. The TypeScript shell talks to it exclusively through the typed
 //! commands below and the `prism://event` broadcast channel.
 
+pub mod ai;
 pub mod documents;
 pub mod events;
 pub mod launch;
@@ -197,6 +198,53 @@ fn get_word_fonts(id: u64, docs: State<'_, DocumentRegistry>) -> Result<Vec<Font
         .collect())
 }
 
+// ---- AI ------------------------------------------------------------------------
+
+#[tauri::command]
+fn ai_status(ai: State<'_, ai::AiStore>) -> ai::AiStatus {
+    ai.status()
+}
+
+#[tauri::command]
+fn set_ai_config(
+    api_key: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
+    ai: State<'_, ai::AiStore>,
+) -> Result<ai::AiStatus, String> {
+    ai.update(api_key, model, effort).map_err(|e| e.to_string())
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiChunk {
+    request_id: String,
+    delta: String,
+}
+
+/// Run one Claude request on a worker thread, streaming text as `prism://ai` events.
+#[tauri::command]
+async fn ai_complete(
+    request: ai::AiRequest,
+    app: AppHandle,
+) -> Result<ai::AiResponse, ai::AiError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.state::<ai::AiStore>();
+        let id = request.request_id.clone();
+        ai::complete(&store, &request, |delta| {
+            let _ = app.emit(
+                "prism://ai",
+                AiChunk {
+                    request_id: id.clone(),
+                    delta: delta.to_string(),
+                },
+            );
+        })
+    })
+    .await
+    .map_err(|e| ai::AiError::Network(e.to_string()))?
+}
+
 // ---- windows -----------------------------------------------------------------
 
 #[tauri::command]
@@ -299,8 +347,11 @@ pub fn run() {
                 20,
             ));
             app.manage(SettingsStore::load(
-                config_dir.map(|d| d.join("settings.json")),
+                config_dir.clone().map(|d| d.join("settings.json")),
             ));
+            let ai_store = ai::AiStore::load(config_dir.map(|d| d.join("ai.json")));
+            let ai_configured = ai_store.status().configured;
+            app.manage(ai_store);
 
             let bus = app.state::<EventBus>().inner().clone();
             let emitter = handle.clone();
@@ -308,7 +359,10 @@ pub fn run() {
                 let _ = emitter.emit(EVENT_CHANNEL, event);
             });
 
-            let registry = services::default_registry();
+            let mut registry = services::default_registry();
+            registry.replace(std::sync::Arc::new(ai::AiService {
+                configured: ai_configured,
+            }));
             registry.start_all(&bus);
             app.manage(registry);
 
@@ -351,7 +405,10 @@ pub fn run() {
             clear_recent,
             get_settings,
             set_settings,
-            list_services
+            list_services,
+            ai_status,
+            set_ai_config,
+            ai_complete
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prism Office");

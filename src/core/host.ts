@@ -51,6 +51,28 @@ export type ServiceState =
 
 export type ServiceInfo = { id: string; name: string } & ServiceState;
 
+export interface AiStatus {
+  configured: boolean;
+  keySource: "settings" | "environment" | "none";
+  model: string;
+  effort: string;
+}
+
+export interface AiRequest {
+  system: string;
+  prompt: string;
+  images?: { mediaType: string; data: string }[];
+  effort?: string;
+  maxTokens?: number;
+}
+
+export interface AiResponse {
+  text: string;
+  stopReason: string;
+  model: string;
+  refusal?: string;
+}
+
 /** Mirrors `events::AppEvent`. */
 export type AppEvent =
   | { type: "documentOpened"; info: DocumentInfo }
@@ -94,6 +116,11 @@ export interface HostBridge {
   getWordFonts(id: number): Promise<{ name: string; style: string; data: string }[]>;
   /** Let the user choose a picture file; resolves to base64 bytes or null. */
   pickImage(): Promise<string | null>;
+
+  aiStatus(): Promise<AiStatus>;
+  setAiConfig(cfg: { apiKey?: string; model?: string; effort?: string }): Promise<AiStatus>;
+  /** One Claude request; `onDelta` receives streamed text. */
+  aiComplete(req: AiRequest, onDelta?: (text: string) => void): Promise<AiResponse>;
 
   openDocumentWindow(id: number): Promise<void>;
   closeCurrentWindow(): Promise<void>;
@@ -181,6 +208,26 @@ export class TauriHost implements HostBridge {
   }
   getWordFonts(id: number) {
     return this.api.invoke<{ name: string; style: string; data: string }[]>("get_word_fonts", { id });
+  }
+  aiStatus() {
+    return this.api.invoke<AiStatus>("ai_status");
+  }
+  setAiConfig(cfg: { apiKey?: string; model?: string; effort?: string }) {
+    return this.api.invoke<AiStatus>("set_ai_config", { apiKey: cfg.apiKey ?? null, model: cfg.model ?? null, effort: cfg.effort ?? null });
+  }
+  async aiComplete(req: AiRequest, onDelta?: (text: string) => void) {
+    const requestId = `ai-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const unlisten = onDelta
+      ? await this.api.listen("prism://ai", (e) => {
+          const p = e.payload as unknown as { requestId: string; delta: string };
+          if (p.requestId === requestId) onDelta(p.delta);
+        })
+      : () => {};
+    try {
+      return await this.api.invoke<AiResponse>("ai_complete", { request: { requestId, ...req } });
+    } finally {
+      unlisten();
+    }
   }
   pickImage() {
     return pickImageFile();
@@ -339,6 +386,18 @@ export class BrowserHost implements HostBridge {
   }
   async getWordFonts() {
     return [];
+  }
+  /** Test hook / dev stub for AI calls in the browser preview. */
+  aiHandler: ((req: AiRequest, onDelta?: (t: string) => void) => Promise<AiResponse>) | null = null;
+  async aiStatus(): Promise<AiStatus> {
+    return { configured: !!this.aiHandler, keySource: "none", model: "claude-opus-5-5", effort: "high" };
+  }
+  async setAiConfig(): Promise<AiStatus> {
+    return this.aiStatus();
+  }
+  async aiComplete(req: AiRequest, onDelta?: (t: string) => void): Promise<AiResponse> {
+    if (!this.aiHandler) throw new Error("AI features require the desktop app (the API key stays in the native host).");
+    return this.aiHandler(req, onDelta);
   }
   pickImage(): Promise<string | null> {
     return pickImageFile();

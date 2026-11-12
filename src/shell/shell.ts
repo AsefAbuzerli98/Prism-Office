@@ -12,6 +12,7 @@ import { WordEditor, type EngineView } from "../word/editor";
 import { IMPLEMENTED_PHASE } from "../core/ribbons";
 import { openPicker } from "./picker";
 import { openSourcesDialog } from "./sources-dialog";
+import { openAgentDialog, openAiSettings, openRewriteDialog } from "../word/ai-panel";
 import { isCollapsed } from "../word/ops";
 
 const isCollapsedSel = (ed: WordEditor) => isCollapsed(ed.selection);
@@ -376,6 +377,20 @@ export class Shell {
         openPicker(anchor, sources.map((s) => ({ value: s.tag, label: `${s.authors[0] ?? s.title} (${s.year || "n.d."})` })), (v) => ed.execute("citation", v), t("ribbon.cmd.doc.citation", {}, "Citation"));
         return true;
       }
+      case "doc.agent":
+        openAgentDialog(this.root, ed, this.host);
+        return true;
+      case "doc.aiSettings":
+        void openAiSettings(this.root, this.host);
+        return true;
+      case "doc.rewrite":
+        openPicker(
+          anchor,
+          (["executive", "technical", "formal", "casual", "friendly", "concise"] as const).map((v) => ({ value: v, label: v[0]!.toUpperCase() + v.slice(1) })),
+          (v) => void openRewriteDialog(this.root, ed, this.host, v as "executive"),
+          t("ribbon.cmd.doc.rewrite", {}, "Rewrite"),
+        );
+        return true;
       case "doc.margins":
         openPicker(
           anchor,
@@ -401,6 +416,8 @@ export class Shell {
   private ribbonEnabled = (id: string, phase: number) => {
     if (this.commands.has(id)) return this.commands.isEnabled(id);
     if (id === "doc.tableTools") return !!this.activeEditor?.state().inTable;
+    if (id === "doc.rewrite") return !!this.activeEditor?.doc && !isCollapsedSel(this.activeEditor);
+    if (id === "doc.agent" || id === "doc.aiSettings") return this.activeEditor?.doc != null;
     if (id === "doc.pictureTools") return !!this.activeEditor?.state().object;
     if (["doc.styles", "doc.font", "doc.margins", "doc.orientation", "doc.table", "doc.columns", "doc.sources", "doc.citation"].includes(id)) return this.activeEditor?.doc != null;
     return phase <= IMPLEMENTED_PHASE;

@@ -987,6 +987,45 @@ export class WordEditor implements EngineView {
     this.commit("revision", resolveRange(this.blocks, a, b, accept), collapsedAt(a));
   }
 
+  /** Plain text of the selection (paragraphs joined by newlines). */
+  selectedText(): string {
+    const [a, b] = ordered(this.selection);
+    return blocksToText(sliceBlocks(this.blocks, a, b));
+  }
+
+  /** Replace the selection with plain text (keeps the formatting at its start). */
+  replaceSelectionText(text: string) {
+    const [a] = ordered(this.selection);
+    const p = this.blocks[a.block];
+    this.pendingMarks = p && isParagraph(p) ? (({ link: _l, revision: _r, ...m }) => m)(marksAt(p, a.offset + 1)) : null;
+    const marks = this.typingMarks();
+    const [, b] = ordered(this.selection);
+    let { blocks, pos } = this.removeRange(a, b);
+    if (this.tracking) pos = b;
+    ({ blocks, pos } = insertText(blocks, pos, text, marks, this.nextStyleOf));
+    this.commit("rewrite", blocks, collapsedAt(pos));
+  }
+
+  /** Insert AI-drafted content: blocks at the caret, plus its footnotes and sources. */
+  insertDraft(draft: { blocks: Block[]; notes: { kind: NoteKind; id: number; blocks: Block[] }[]; sources: Source[] }) {
+    if (!this.doc) return;
+    this.container = null;
+    this.filterLines();
+    const at = Math.min(ordered(this.selection)[0].block + 1, this.doc.blocks.length);
+    const cur = this.doc.blocks[at - 1];
+    const replaceEmpty = cur && isParagraph(cur) && cur.inlines.length === 0;
+    const blocks = [...this.doc.blocks.slice(0, replaceEmpty ? at - 1 : at), ...draft.blocks, ...this.doc.blocks.slice(at)];
+    const sources = [...(this.doc.sources ?? [])];
+    for (const s of draft.sources) if (!sources.some((x) => x.tag === s.tag)) sources.push(s);
+    const end = (replaceEmpty ? at - 1 : at) + draft.blocks.length - 1;
+    this.commitDoc("draft", { ...this.doc, blocks, notes: [...(this.doc.notes ?? []), ...draft.notes], sources }, collapsedAt({ block: Math.max(0, end), offset: Infinity }), null);
+  }
+
+  /** Next free footnote id. */
+  nextNoteId(): number {
+    return Math.max(0, ...(this.doc?.notes ?? []).filter((n) => n.kind === "footnote").map((n) => n.id)) + 1;
+  }
+
   // ---- commands ------------------------------------------------------------------------
 
   execute(command: string, arg?: string): boolean {
