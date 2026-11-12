@@ -11,6 +11,8 @@ thiserror.workspace = true
 quick-xml.workspace = true
 zip.workspace = true
 serde.workspace = true
+bytes = "1.10"
+memmap2 = "0.9"
 
 [dev-dependencies]
 tempfile.workspace = true

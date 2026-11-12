@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+
+use bytes::Bytes;
 use std::io::{Cursor, Read, Seek, Write};
 
 use zip::write::SimpleFileOptions;
@@ -37,7 +39,7 @@ impl Default for Limits {
 /// `[Content_Types].xml` is held in parsed form and regenerated on save.
 #[derive(Clone, Debug, Default)]
 pub struct Package {
-    parts: BTreeMap<PartName, Vec<u8>>,
+    parts: BTreeMap<PartName, Bytes>,
     content_types: ContentTypes,
 }
 
@@ -51,15 +53,45 @@ impl Package {
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        Self::read(Cursor::new(bytes), Limits::default())
+        Self::from_shared(Bytes::copy_from_slice(bytes), Limits::default())
     }
 
+    /// Read from a shared buffer. Parts stored without compression are
+    /// sliced out of `bytes` without copying (zero-copy); deflated parts are
+    /// inflated once into their own buffers.
+    pub fn from_shared(bytes: Bytes, limits: Limits) -> Result<Self> {
+        Self::read_impl(Cursor::new(bytes.as_ref()), limits, Some(&bytes))
+    }
+
+    /// Open a package from disk. Files above 8 MiB are memory-mapped so that
+    /// stored (uncompressed) parts such as media are never copied.
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self> {
         let file = std::fs::File::open(path)?;
-        Self::read(std::io::BufReader::new(file), Limits::default())
+        let len = file.metadata()?.len();
+        let bytes = if len > 8 * 1024 * 1024 {
+            // SAFETY: the mapping is read-only. Prism saves atomically
+            // (write temp + rename), so our own saves never mutate a mapped
+            // inode; truncation by another process could fault, which is the
+            // accepted trade-off for zero-copy access to large packages.
+            let map = unsafe { memmap2::Mmap::map(&file)? };
+            Bytes::from_owner(map)
+        } else {
+            let mut buf = Vec::with_capacity(len as usize);
+            std::io::BufReader::new(file).read_to_end(&mut buf)?;
+            Bytes::from(buf)
+        };
+        Self::from_shared(bytes, Limits::default())
     }
 
     pub fn read<R: Read + Seek>(reader: R, limits: Limits) -> Result<Self> {
+        Self::read_impl(reader, limits, None)
+    }
+
+    fn read_impl<R: Read + Seek>(
+        reader: R,
+        limits: Limits,
+        shared: Option<&Bytes>,
+    ) -> Result<Self> {
         let mut zip = ZipArchive::new(reader)?;
         if zip.len() > limits.max_parts {
             return Err(Error::LimitExceeded(format!(
@@ -94,16 +126,32 @@ impl Package {
                 )));
             }
 
-            // Never trust the declared size: cap the actual read as well.
-            let mut data = Vec::with_capacity(declared.min(16 * 1024 * 1024) as usize);
-            (&mut entry)
-                .take(limits.max_part_size + 1)
-                .read_to_end(&mut data)?;
-            if data.len() as u64 > limits.max_part_size {
-                return Err(Error::LimitExceeded(format!(
-                    "part `{name}` exceeds size limit"
-                )));
-            }
+            let zero_copy = match (shared, entry.compression(), entry.data_start()) {
+                (Some(buf), CompressionMethod::Stored, Some(start)) => {
+                    let start = start as usize;
+                    start
+                        .checked_add(declared as usize)
+                        .filter(|&end| end <= buf.len())
+                        .map(|end| buf.slice(start..end))
+                }
+                _ => None,
+            };
+            let data = match zero_copy {
+                Some(b) => b,
+                None => {
+                    // Never trust the declared size: cap the actual read as well.
+                    let mut data = Vec::with_capacity(declared.min(16 * 1024 * 1024) as usize);
+                    (&mut entry)
+                        .take(limits.max_part_size + 1)
+                        .read_to_end(&mut data)?;
+                    if data.len() as u64 > limits.max_part_size {
+                        return Err(Error::LimitExceeded(format!(
+                            "part `{name}` exceeds size limit"
+                        )));
+                    }
+                    Bytes::from(data)
+                }
+            };
             total += data.len() as u64;
             if total > limits.max_total_size {
                 return Err(Error::LimitExceeded("total uncompressed size".into()));
@@ -142,8 +190,12 @@ impl Package {
 
         zip.start_file(CONTENT_TYPES_PART, opts)?;
         zip.write_all(self.content_types.to_xml().as_bytes())?;
+        let stored = opts.compression_method(CompressionMethod::Stored);
         for (name, data) in &self.parts {
-            zip.start_file(name.zip_name(), opts)?;
+            // Already-compressed media gains nothing from deflate; storing it
+            // also enables zero-copy reads.
+            let o = if is_precompressed(name) { stored } else { opts };
+            zip.start_file(name.zip_name(), o)?;
             zip.write_all(data)?;
         }
         zip.finish()?;
@@ -188,7 +240,12 @@ impl Package {
     }
 
     pub fn part(&self, name: &PartName) -> Option<&[u8]> {
-        self.parts.get(name).map(Vec::as_slice)
+        self.parts.get(name).map(Bytes::as_ref)
+    }
+
+    /// Cheap, reference-counted handle to a part's bytes (no copy).
+    pub fn part_bytes(&self, name: &PartName) -> Option<Bytes> {
+        self.parts.get(name).cloned()
     }
 
     pub fn part_str(&self, name: &str) -> Option<&[u8]> {
@@ -213,7 +270,7 @@ impl Package {
 
     /// Insert or replace a part. If `content_type` is given it is recorded as
     /// an override (unless it equals the extension default).
-    pub fn set_part(&mut self, name: PartName, data: Vec<u8>, content_type: Option<&str>) {
+    pub fn set_part(&mut self, name: PartName, data: impl Into<Bytes>, content_type: Option<&str>) {
         if let Some(ct) = content_type {
             let matches_default = name
                 .extension()
@@ -223,10 +280,10 @@ impl Package {
                 self.content_types.set_override(name.clone(), ct);
             }
         }
-        self.parts.insert(name, data);
+        self.parts.insert(name, data.into());
     }
 
-    pub fn remove_part(&mut self, name: &PartName) -> Option<Vec<u8>> {
+    pub fn remove_part(&mut self, name: &PartName) -> Option<Bytes> {
         self.content_types.remove_override(name);
         self.parts.remove(name)
     }
@@ -256,7 +313,8 @@ impl Package {
 
     pub fn set_relationships(&mut self, source: Option<&PartName>, rels: &Relationships) {
         let name = Self::rels_name(source);
-        self.parts.insert(name, rels.to_xml().into_bytes());
+        self.parts
+            .insert(name, Bytes::from(rels.to_xml().into_bytes()));
     }
 
     /// The main document part, located via the root `officeDocument` relationship.
@@ -278,10 +336,60 @@ impl Package {
     }
 }
 
+fn is_precompressed(name: &PartName) -> bool {
+    matches!(
+        name.extension().as_deref(),
+        Some(
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "mp4" | "m4a" | "mp3" | "mov" | "zip" | "wdp"
+        )
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::TargetMode;
+
+    #[test]
+    fn stored_media_is_zero_copy() {
+        let mut p = sample();
+        let media = PartName::new("/word/media/image1.png").unwrap();
+        p.content_types_mut().set_default("png", "image/png");
+        p.set_part(media.clone(), vec![7u8; 10_000], None);
+        let shared = Bytes::from(p.to_bytes().unwrap());
+        let q = Package::from_shared(shared.clone(), Limits::default()).unwrap();
+        let part = q.part_bytes(&media).unwrap();
+        assert_eq!(part.len(), 10_000);
+        let base = shared.as_ptr() as usize;
+        let at = part.as_ptr() as usize;
+        assert!(
+            at >= base && at + part.len() <= base + shared.len(),
+            "must alias the source buffer"
+        );
+        // deflated XML parts are owned copies
+        let doc = q
+            .part_bytes(&PartName::new("/word/document.xml").unwrap())
+            .unwrap();
+        let at = doc.as_ptr() as usize;
+        assert!(!(at >= base && at < base + shared.len()));
+    }
+
+    #[test]
+    fn large_files_open_via_mmap() {
+        let mut p = sample();
+        p.content_types_mut().set_default("mp4", "video/mp4");
+        p.set_part(
+            PartName::new("/media/v.mp4").unwrap(),
+            vec![1u8; 9 * 1024 * 1024],
+            None,
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.docx");
+        p.save(&path).unwrap();
+        let q = Package::open(&path).unwrap();
+        assert_eq!(q.part_str("media/v.mp4").unwrap().len(), 9 * 1024 * 1024);
+        assert_eq!(q.kind().unwrap(), DocumentKind::Document);
+    }
 
     fn sample() -> Package {
         let mut p = Package::new();

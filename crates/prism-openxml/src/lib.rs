@@ -13,9 +13,10 @@ mod kind;
 mod package;
 mod part_name;
 mod rels;
+pub mod spreadsheetml;
 pub mod templates;
 mod validate;
-mod xml;
+pub mod xml;
 
 pub use content_types::ContentTypes;
 pub use error::{Error, Result};

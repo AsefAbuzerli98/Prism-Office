@@ -23,11 +23,11 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 - [x] **P1-01** Tauri v2 host crate (`src-tauri`) with main window config & capabilities.
 - [x] **P1-02** IPC bridge: typed commands `open_document`, `save_document`, `new_document`, `app_info`.
 - [x] **P1-03** File I/O layer: read/write packages with atomic save (temp file + rename).
-- [ ] **P1-04** Native window styling: macOS vibrancy/traffic-light inset, Windows Mica/Snap layouts.
-- [ ] **P1-05** Contextual multi-instance windows (one native window per document, `WebviewWindowBuilder`).
-- [ ] **P1-06** Shared background daemon registry (AI, Python sandbox, recovery) with event bus.
-- [ ] **P1-07** Native open/save dialogs + OS file association registration (.docx/.xlsx/.pptx).
-- [ ] **P1-08** Recent files store & single-instance handling (open file from OS into existing app).
+- [x] **P1-04** Native window styling: macOS vibrancy/traffic-light inset, Windows Mica/Snap layouts.
+- [x] **P1-05** Contextual multi-instance windows (one native window per document, `WebviewWindowBuilder`).
+- [x] **P1-06** Shared background daemon registry (AI, Python sandbox, recovery) with event bus.
+- [x] **P1-07** Native open/save dialogs + OS file association registration (.docx/.xlsx/.pptx).
+- [x] **P1-08** Recent files store & single-instance handling (open file from OS into existing app).
 
 ### 1B. OpenXML packaging engine (`crates/prism-openxml`)
 - [x] **P1-10** OPC package reader: ZIP container, `[Content_Types].xml`, part map.
@@ -36,8 +36,8 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 - [x] **P1-13** OPC package writer with deterministic ordering & round-trip test.
 - [x] **P1-14** Minimal blank document templates (docx/xlsx/pptx) generated in Rust.
 - [x] **P1-15** Package validation (missing content types, dangling rels, zip-bomb/size limits, path traversal).
-- [ ] **P1-16** Zero-copy part access (`bytes::Bytes` / mmap for large packages).
-- [ ] **P1-17** Streaming reader for very large `.xlsx` (sheet XML SAX pull parser).
+- [x] **P1-16** Zero-copy part access (`bytes::Bytes` / mmap for large packages).
+- [x] **P1-17** Streaming reader for very large `.xlsx` (sheet XML SAX pull parser).
 
 ### 1C. Application Hub & shell UI (TypeScript)
 - [x] **P1-20** Application Hub gateway: mode cards (Document / Workbook / Presentation), open file, recent list.
@@ -45,9 +45,9 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 - [x] **P1-22** Mode-specific ribbon definitions (Typography/Page Setup/Citations/Structure; Data/Formulas/Python/Pivot; Design/Cameo/Transitions/Recording).
 - [x] **P1-23** Tabbed MDI: tab model (open/close/activate/dirty), ribbon & engine swap on tab switch.
 - [x] **P1-24** Host bridge abstraction (Tauri IPC vs. browser fallback for dev/tests).
-- [ ] **P1-25** Windowing topology preference (Tabbed MDI ⇄ Multi-Instance) in settings.
-- [ ] **P1-26** Keyboard shortcuts & command palette.
-- [ ] **P1-27** i18n framework (en, az) and RTL readiness.
+- [x] **P1-25** Windowing topology preference (Tabbed MDI ⇄ Multi-Instance) in settings.
+- [x] **P1-26** Keyboard shortcuts & command palette.
+- [x] **P1-27** i18n framework (en, az) and RTL readiness.
 
 ## Phase 2 — Word Processing Engine
 
@@ -124,6 +124,14 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 
 ## Progress log
 
+- **2026-11-12** — Phase 1 complete: window styling (macOS overlay/traffic
+  lights, Windows Mica), per-document native windows + tab detach, shared
+  daemon registry with event bus (AI/Python/recovery registered as planned
+  stubs), native dialogs, OS file-open handling (argv, single-instance,
+  macOS `Opened`), persistent recent files & settings, zero-copy/mmap part
+  access, streaming worksheet reader, windowing preference, command palette &
+  shortcuts, en/az i18n with RTL-ready CSS. Rust cross-checked for
+  `x86_64-pc-windows-msvc` and `aarch64-apple-darwin`; CI runs on all three OSes.
 - **2026-11-12** — Task plan created. Phase 0 + core of Phase 1 started:
   workspace scaffold, `prism-openxml` (read/write/validate/detect/templates),
   Tauri host with IPC commands, Hub + adaptive theming + ribbons + tabbed MDI.

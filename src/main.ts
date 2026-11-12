@@ -7,6 +7,7 @@ async function boot() {
   if (!root) throw new Error("#app root missing");
   const host = await detectHost();
   const shell = new Shell(root, host);
+  await shell.init();
   (globalThis as { prism?: unknown }).prism = { shell, host };
 }
 

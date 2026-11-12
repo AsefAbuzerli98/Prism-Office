@@ -10,30 +10,54 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Prism Office",
-        "width": 1280,
-        "height": 820,
-        "minWidth": 900,
-        "minHeight": 600,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost"
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg", "app", "msi", "nsis"],
-    "icon": ["icons/icon.png"],
+    "targets": [
+      "dmg",
+      "app",
+      "msi",
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
     "fileAssociations": [
-      { "ext": ["docx", "docm", "dotx"], "name": "Prism Document", "role": "Editor", "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
-      { "ext": ["xlsx", "xlsm", "xltx"], "name": "Prism Workbook", "role": "Editor", "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-      { "ext": ["pptx", "pptm", "potx"], "name": "Prism Presentation", "role": "Editor", "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation" }
+      {
+        "ext": [
+          "docx",
+          "docm",
+          "dotx"
+        ],
+        "name": "Prism Document",
+        "role": "Editor",
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      },
+      {
+        "ext": [
+          "xlsx",
+          "xlsm",
+          "xltx"
+        ],
+        "name": "Prism Workbook",
+        "role": "Editor",
+        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      },
+      {
+        "ext": [
+          "pptx",
+          "pptm",
+          "potx"
+        ],
+        "name": "Prism Presentation",
+        "role": "Editor",
+        "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+      }
     ]
   }
 }

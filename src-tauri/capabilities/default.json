@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main Prism Office window",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "description": "Capabilities for the main window and per-document windows",
+  "windows": ["main", "doc-*"],
+  "permissions": ["core:default", "dialog:allow-open", "dialog:allow-save", "dialog:allow-ask", "dialog:allow-message"]
 }

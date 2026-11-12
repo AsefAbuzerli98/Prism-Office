@@ -1,58 +1,43 @@
 import { h } from "../core/dom";
+import type { RecentFile } from "../core/host";
+import { t } from "../core/i18n";
 import { MODES, MODE_ORDER, type Mode } from "../core/modes";
-
-export interface RecentFile {
-  path: string;
-  mode: Mode;
-  openedAt: number;
-}
 
 export interface HubActions {
   onNew(mode: Mode): void;
+  onOpenDialog(): void;
   onOpenPath(path: string): void;
-}
-
-const RECENTS_KEY = "prism.recentFiles";
-
-export function loadRecents(storage: Storage = localStorage): RecentFile[] {
-  try {
-    const v = JSON.parse(storage.getItem(RECENTS_KEY) ?? "[]");
-    return Array.isArray(v) ? (v as RecentFile[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function rememberRecent(file: RecentFile, storage: Storage = localStorage, max = 12) {
-  const list = [file, ...loadRecents(storage).filter((r) => r.path !== file.path)].slice(0, max);
-  storage.setItem(RECENTS_KEY, JSON.stringify(list));
+  onRemoveRecent(path: string): void;
+  onClearRecent(): void;
+  onSettings(): void;
 }
 
 /** The Application Hub: modality gateway shown on launch and on "+" tab. */
-export function renderHub(actions: HubActions): HTMLElement {
+export function renderHub(actions: HubActions, recents: RecentFile[]): HTMLElement {
   const cards = MODE_ORDER.map((m) => {
     const info = MODES[m];
+    const label = t(`mode.${m}`);
     return h(
       "button",
       {
         class: "mode-card",
         dataset: { mode: m },
         style: `--card-accent:${info.accent.base};--card-soft:${info.accent.soft}`,
-        "aria-label": `New ${info.label}`,
+        "aria-label": t("hub.new", { mode: label }),
         onclick: () => actions.onNew(m),
       },
       h("span", { class: "mode-glyph" }, info.glyph),
-      h("span", { class: "mode-title" }, info.label),
-      h("span", { class: "mode-equiv" }, `${info.equivalent} modality`),
-      h("span", { class: "mode-tagline" }, info.tagline),
+      h("span", { class: "mode-title" }, label),
+      h("span", { class: "mode-equiv" }, t("hub.modality", { app: info.equivalent })),
+      h("span", { class: "mode-tagline" }, t(`mode.${m}.tagline`)),
     );
   });
 
   const pathInput = h("input", {
     class: "open-path",
     type: "text",
-    placeholder: "Path to .docx, .xlsx or .pptx",
-    "aria-label": "File path",
+    placeholder: t("hub.pathPlaceholder"),
+    "aria-label": t("hub.pathPlaceholder"),
   });
   const openForm = h(
     "form",
@@ -65,10 +50,9 @@ export function renderHub(actions: HubActions): HTMLElement {
       },
     },
     pathInput,
-    h("button", { type: "submit", class: "btn" }, "Open"),
+    h("button", { type: "submit", class: "btn btn-quiet" }, t("hub.open")),
   );
 
-  const recents = loadRecents();
   const recentList = recents.length
     ? h(
         "ul",
@@ -76,38 +60,63 @@ export function renderHub(actions: HubActions): HTMLElement {
         ...recents.map((r) =>
           h(
             "li",
-            {},
+            { class: "recent-row" },
             h(
               "button",
               {
-                class: "recent-item",
-                dataset: { mode: r.mode },
+                class: `recent-item${r.exists ? "" : " missing"}`,
+                dataset: { mode: r.kind },
+                disabled: !r.exists,
+                title: r.path,
                 onclick: () => actions.onOpenPath(r.path),
               },
-              h("span", { class: "recent-dot", style: `background:${MODES[r.mode].accent.base}` }),
+              h("span", { class: "recent-dot", style: `background:${MODES[r.kind].accent.base}` }),
               h("span", { class: "recent-name" }, r.path.split(/[\\/]/).pop() ?? r.path),
-              h("span", { class: "recent-path" }, r.path),
+              h("span", { class: "recent-path" }, r.exists ? r.path : `${t("hub.missing")} · ${r.path}`),
+            ),
+            h(
+              "button",
+              { class: "recent-remove", "aria-label": `× ${r.path}`, onclick: () => actions.onRemoveRecent(r.path) },
+              "×",
             ),
           ),
         ),
       )
-    : h("p", { class: "muted" }, "No recent files yet.");
+    : h("p", { class: "muted" }, t("hub.noRecent"));
 
   return h(
     "section",
-    { class: "hub", "aria-label": "Application Hub" },
+    { class: "hub", "aria-label": t("shell.hub") },
     h(
       "header",
       { class: "hub-header" },
-      h("h1", {}, "Prism Office"),
-      h("p", { class: "muted" }, "Choose a workspace to begin."),
+      h("div", {}, h("h1", {}, t("app.name")), h("p", { class: "muted" }, t("hub.subtitle"))),
+      h("button", { class: "btn btn-quiet hub-settings", onclick: () => actions.onSettings() }, `⚙ ${t("hub.settings")}`),
     ),
     h("div", { class: "mode-grid" }, ...cards),
     h(
       "div",
       { class: "hub-lower" },
-      h("section", { class: "hub-panel" }, h("h2", {}, "Open"), openForm),
-      h("section", { class: "hub-panel" }, h("h2", {}, "Recent"), recentList),
+      h(
+        "section",
+        { class: "hub-panel" },
+        h("h2", {}, t("hub.open")),
+        h("button", { class: "btn open-dialog", onclick: () => actions.onOpenDialog() }, t("hub.openFile")),
+        openForm,
+      ),
+      h(
+        "section",
+        { class: "hub-panel" },
+        h(
+          "div",
+          { class: "panel-head" },
+          h("h2", {}, t("hub.recent")),
+          recents.length
+            ? h("button", { class: "link", onclick: () => actions.onClearRecent() }, t("hub.clearRecent"))
+            : null,
+        ),
+        recentList,
+      ),
     ),
   );
 }

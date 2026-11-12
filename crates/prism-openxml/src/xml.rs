@@ -5,7 +5,7 @@ use quick_xml::Reader;
 
 use crate::{Error, Result};
 
-pub(crate) const XML_DECL: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#;
+pub const XML_DECL: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#;
 
 /// Visit every start/empty element, giving its local name and attributes.
 pub(crate) fn for_each_element(
@@ -49,7 +49,7 @@ fn attributes(part: &str, e: &BytesStart<'_>) -> Result<Vec<(String, String)>> {
     Ok(out)
 }
 
-pub(crate) fn attr<'a>(attrs: &'a [(String, String)], name: &str) -> Option<&'a str> {
+pub fn attr<'a>(attrs: &'a [(String, String)], name: &str) -> Option<&'a str> {
     attrs
         .iter()
         .find(|(k, _)| k == name)
@@ -57,7 +57,7 @@ pub(crate) fn attr<'a>(attrs: &'a [(String, String)], name: &str) -> Option<&'a 
 }
 
 /// Escape a string for use inside a double-quoted XML attribute.
-pub(crate) fn escape_attr(s: &str) -> String {
+pub fn escape_attr(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -70,4 +70,42 @@ pub(crate) fn escape_attr(s: &str) -> String {
         }
     }
     out
+}
+
+/// Text of a `Text` event. With quick-xml ≥0.38 entity references are
+/// delivered separately as `GeneralRef` events, so the raw text contains no
+/// escapes.
+pub fn text_of(e: &quick_xml::events::BytesText<'_>) -> String {
+    e.clone().into_inner().into_owned()
+}
+
+/// Resolve a `GeneralRef` event (`&amp;`, `&#x41;` …) to its text.
+pub fn ref_text(r: &quick_xml::events::BytesRef<'_>) -> String {
+    if r.is_char_ref() {
+        return r
+            .resolve_char_ref()
+            .ok()
+            .flatten()
+            .map(String::from)
+            .unwrap_or_default();
+    }
+    match r.clone().into_inner().as_ref() {
+        "amp" => "&",
+        "lt" => "<",
+        "gt" => ">",
+        "quot" => "\"",
+        "apos" => "'",
+        _ => "",
+    }
+    .to_string()
+}
+
+/// Attributes of an element as (local-name, unescaped value) pairs.
+pub fn attrs_of(e: &BytesStart<'_>) -> Vec<(String, String)> {
+    attributes("", e).unwrap_or_default()
+}
+
+/// Local name of an element.
+pub fn name_of(e: &BytesStart<'_>) -> String {
+    local_name(e)
 }
