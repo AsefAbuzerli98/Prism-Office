@@ -1,0 +1,16 @@
+[package]
+name = "prism-word"
+description = "WordprocessingML (DOCX) document model, import and export for Prism Office"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+prism-openxml.workspace = true
+quick-xml.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

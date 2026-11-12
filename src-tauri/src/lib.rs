@@ -111,6 +111,23 @@ fn list_documents(docs: State<'_, DocumentRegistry>) -> Vec<DocumentInfo> {
     docs.list()
 }
 
+#[tauri::command]
+fn get_word_document(
+    id: u64,
+    docs: State<'_, DocumentRegistry>,
+) -> Result<prism_word::WordDocument, DocError> {
+    docs.word(id)
+}
+
+#[tauri::command]
+fn update_word_document(
+    id: u64,
+    content: prism_word::WordDocument,
+    docs: State<'_, DocumentRegistry>,
+) -> Result<(), DocError> {
+    docs.set_word(id, content)
+}
+
 // ---- windows -----------------------------------------------------------------
 
 #[tauri::command]
@@ -253,6 +270,8 @@ pub fn run() {
             save_document,
             close_document,
             list_documents,
+            get_word_document,
+            update_word_document,
             open_document_window,
             take_pending_opens,
             recent_files,

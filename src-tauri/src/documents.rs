@@ -17,6 +17,10 @@ pub enum DocError {
     NotFound(u64),
     #[error("document has never been saved; a path is required")]
     PathRequired,
+    #[error(transparent)]
+    Word(#[from] prism_word::Error),
+    #[error("document {0} is not a word-processing document")]
+    NotWord(u64),
     #[error("file extension `.{ext}` does not match a {kind:?}")]
     ExtensionMismatch { ext: String, kind: DocumentKind },
 }
@@ -44,6 +48,10 @@ struct OpenDocument {
     title: String,
     path: Option<PathBuf>,
     package: Package,
+    /// Parsed word-processing model (lazily created; authoritative once edited).
+    word: Option<prism_word::WordDocument>,
+    /// The model has changes not yet written into `package`.
+    word_dirty: bool,
 }
 
 #[derive(Default)]
@@ -95,6 +103,8 @@ impl DocumentRegistry {
             title: format!("{base} {n}"),
             path: None,
             package: templates::blank(kind),
+            word: None,
+            word_dirty: false,
         })
     }
 
@@ -106,6 +116,8 @@ impl DocumentRegistry {
             title: title_from_path(path),
             path: Some(path.to_path_buf()),
             package,
+            word: None,
+            word_dirty: false,
         }))
     }
 
@@ -124,10 +136,50 @@ impl DocumentRegistry {
                 });
             }
         }
+        if doc.word_dirty {
+            if let Some(w) = &doc.word {
+                prism_word::write_package(&mut doc.package, w)?;
+            }
+            doc.word_dirty = false;
+        }
         doc.package.save(&target)?;
         doc.title = title_from_path(&target);
         doc.path = Some(target);
         Ok(Self::info(id, doc))
+    }
+
+    /// The editable word-processing model of a document.
+    pub fn word(&self, id: u64) -> Result<prism_word::WordDocument, DocError> {
+        let mut docs = self.docs.lock().unwrap();
+        let doc = docs.get_mut(&id).ok_or(DocError::NotFound(id))?;
+        if doc.kind != DocumentKind::Document {
+            return Err(DocError::NotWord(id));
+        }
+        if doc.word.is_none() {
+            doc.word = Some(prism_word::read_package(&doc.package)?);
+        }
+        Ok(doc.word.clone().unwrap())
+    }
+
+    /// Replace the model after an edit. The read-only catalogues (styles,
+    /// numbering) are always taken from the package, never from the UI.
+    pub fn set_word(&self, id: u64, mut content: prism_word::WordDocument) -> Result<(), DocError> {
+        let mut docs = self.docs.lock().unwrap();
+        let doc = docs.get_mut(&id).ok_or(DocError::NotFound(id))?;
+        if doc.kind != DocumentKind::Document {
+            return Err(DocError::NotWord(id));
+        }
+        let base = match doc.word.take() {
+            Some(w) => w,
+            None => prism_word::read_package(&doc.package)?,
+        };
+        content.styles = base.styles;
+        content.numbering = base.numbering;
+        content.default_run = base.default_run;
+        content.default_para = base.default_para;
+        doc.word = Some(content);
+        doc.word_dirty = true;
+        Ok(())
     }
 
     pub fn get(&self, id: u64) -> Result<DocumentInfo, DocError> {
@@ -158,6 +210,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn word_model_edit_and_save() {
+        let reg = DocumentRegistry::default();
+        let d = reg.create(DocumentKind::Document);
+        let mut w = reg.word(d.id).unwrap();
+        assert_eq!(w.blocks.len(), 1);
+        w.blocks = vec![prism_word::Block::Paragraph(prism_word::Paragraph::plain(
+            "Salam dünya",
+        ))];
+        w.styles.clear(); // UI must not be able to clobber catalogues
+        reg.set_word(d.id, w).unwrap();
+        assert!(!reg.word(d.id).unwrap().styles.is_empty());
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hello.docx");
+        reg.save(d.id, Some(&path)).unwrap();
+        let reopened = reg.open(&path).unwrap();
+        assert_eq!(reg.word(reopened.id).unwrap().plain_text(), "Salam dünya");
+    }
+
+    #[test]
     fn create_save_open_close() {
         let reg = DocumentRegistry::default();
         let a = reg.create(DocumentKind::Workbook);
@@ -185,6 +257,7 @@ mod tests {
         assert_eq!(opened.kind, DocumentKind::Workbook);
         assert_eq!(reg.list().len(), 3);
 
+        assert!(matches!(reg.word(opened.id), Err(DocError::NotWord(_))));
         reg.close(opened.id).unwrap();
         assert!(matches!(reg.get(opened.id), Err(DocError::NotFound(_))));
     }
