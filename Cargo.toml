@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/prism-openxml", "crates/prism-word", "src-tauri"]
-default-members = ["crates/prism-openxml", "crates/prism-word"]
+members = ["crates/prism-openxml", "crates/prism-word", "crates/prism-sheet", "src-tauri"]
+default-members = ["crates/prism-openxml", "crates/prism-word", "crates/prism-sheet"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +12,7 @@ rust-version = "1.80"
 [workspace.dependencies]
 prism-openxml = { path = "crates/prism-openxml" }
 prism-word = { path = "crates/prism-word" }
+prism-sheet = { path = "crates/prism-sheet" }
 thiserror = "2"
 quick-xml = "0.42"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
