@@ -52,22 +52,22 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 ## Phase 2 — Word Processing Engine
 
 - [x] **P2-01** Document model (blocks/inlines/runs, styles) with immutable transactions + undo/redo.
-- [x] **P2-02** DOCX import: `word/document.xml`, `styles.xml`, numbering, sections (headers/footers preserved, not yet rendered).
-- [~] **P2-03** DOCX export with round-trip fidelity tests — synthetic fixtures + TS⇄Rust contract done; real-world corpus pending (X-04).
-- [~] **P2-04** Paragraph layout engine — greedy breaking (spaces/hyphens/CJK), alignment, justification, tabs done; full UAX #14, hyphenation, bidi pending.
-- [~] **P2-05** Font metrics via canvas `measureText` with caching; shaping (rustybuzz), fallback and embedded fonts pending.
-- [~] **P2-06** Pagination — page size/orientation, margins, page breaks, keep-with-next, orphan control done; columns and widow control pending.
-- [~] **P2-07** Canvas renderer, caret & selection, hit-testing, IME input (Canvas 2D backend); WebGPU/WebGL2 backend pending.
+- [x] **P2-02** DOCX import: `word/document.xml`, `styles.xml`, numbering, sections, headers/footers, footnotes/endnotes, comments, settings, bibliography sources.
+- [x] **P2-03** DOCX export with round-trip fidelity tests — synthetic fixtures, TS⇄Rust contract, and an 11-file real-world corpus (Apache POI, python-docx) checked for model stability, unchanged parts and idempotence. Broader Microsoft 365 / Google / iWork corpus is X-04.
+- [x] **P2-04** Paragraph layout engine: UAX #14-subset breaking, soft + Liang auto-hyphenation, alignment/justification, tab stops with leaders, bidi reordering (UAX #9 L2 on fragments). See ADR-0003 for scope.
+- [x] **P2-05** Fonts: cached canvas metrics, platform shaping (ADR-0003 — rustybuzz deliberately not bundled), metric-compatible fallback stacks, embedded DOCX fonts de-obfuscated and loaded via FontFace.
+- [x] **P2-06** Pagination: page size/orientation, margins, columns (with separators), page/column breaks, keep-with-next, widow/orphan control, repeated table header rows, footnote area.
+- [~] **P2-07** Renderer: page raster cache + WebGL2 compositor (default) with Canvas 2D fallback, overlay caret/selection, hit-testing, IME. WebGPU backend implemented but opt-in — untested on real GPUs (blank under headless SwiftShader).
 - [x] **P2-08** Typography ribbon wired to commands (font, size, bold/italic, styles, lists).
 - [x] **P2-09** Markdown ⇄ OpenXML bidirectional converter + split-pane Markdown source view.
-- [~] **P2-10** Clipboard interop — HTML, plain text and native Prism fragments done; RTF and images pending.
-- [ ] **P2-11** Tables, images, footnotes/endnotes, fields (TOC, page numbers), citations.
-- [ ] **P2-12** AI Agent panel: autonomous multi-step drafting from outline/reference files.
-- [ ] **P2-13** Verifiable source citations (footnotes linked to source documents / KB).
-- [ ] **P2-14** Contextual semantic rewriting (tone, brevity) with inline diff suggestions.
-- [ ] **P2-15** Ink & stylus input, ink-to-shape recognition, handwriting-to-text.
-- [ ] **P2-16** Accessibility checker: contrast, heading hierarchy, alt text, readability score.
-- [ ] **P2-17** Track changes & comments (OpenXML `w:ins`/`w:del`/comments part).
+- [x] **P2-10** Clipboard interop: HTML (incl. tables), RTF (read/write), plain text, native Prism fragments, pasted images.
+- [x] **P2-11** Tables (edit, rows/columns, merge/split, shading, header rows), pictures (insert/scale/alt text), shapes, footnotes/endnotes, headers/footers with PAGE/NUMPAGES, TOC and citation/bibliography fields, source manager.
+- [x] **P2-12** AI Agent panel: drafting from outline + reference files with streamed preview (Claude via the native AI daemon). Not exercised against the live API in this environment (no key).
+- [x] **P2-13** Verifiable citations: `[[n|quote]]` markers become footnotes + bibliography sources; quotes are checked verbatim against the reference text and unverified ones are flagged.
+- [x] **P2-14** Rewriting in six tones with a word-level inline diff to accept or discard.
+- [x] **P2-15** Ink overlay (pointer/pen), ink-to-shape (line, arrow, triangle, rectangle, diamond, ellipse → DrawingML shapes), handwriting-to-text via the AI daemon's vision model.
+- [x] **P2-16** Accessibility checker: contrast, heading order/empty headings, missing alt text (manual or AI-generated), table headers, vague links, small text, LIX/Flesch readability.
+- [x] **P2-17** Track changes (record, show/hide markup, accept/reject one/all, next change) and comments (anchor, side panel, edit, delete) with `w:ins`/`w:del`/comments.xml round-trip.
 
 ## Phase 3 — Spreadsheet Calculation Engine
 
@@ -107,7 +107,7 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 ## Cross-cutting
 
 - [ ] **X-01** Local-first auto-recovery: differential transaction journal every 3 s, crash restore.
-- [ ] **X-02** AI service daemon: provider abstraction, streaming, rate limits, privacy controls.
+- [~] **X-02** AI service daemon: Claude Messages API with streaming, refusal fallbacks, key kept in the native host (env or 0600 file). Pending: OS keychain storage, rate-limit/backoff handling, provider abstraction.
 - [ ] **X-03** Telemetry-free crash reporting (opt-in), structured logging.
 - [ ] **X-04** OpenXML conformance corpus tests (Microsoft 365, Google Workspace, iWork exports).
 
@@ -123,6 +123,11 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 ---
 
 ## Progress log
+
+- **2026-11-12** — Phase 2 complete except WebGPU validation (P2-07): tables,
+  pictures, shapes, notes, headers/footers, fields, tracked changes, comments,
+  columns, hyphenation, bidi, RTF, GPU compositor, AI drafting/rewriting with
+  verified citations, ink, accessibility checker, real-world DOCX corpus.
 
 - **2026-11-12** — Phase 0 complete (git hooks, ADRs). Phase 2 started:
   `prism-word` crate (lossless DOCX ⇄ model), canvas WYSIWYG editor with

@@ -9,3 +9,4 @@ supersedes them instead.
 | --- | --- | --- |
 | [0001](./0001-desktop-stack.md) | Desktop stack: Tauri v2 + Rust core + TypeScript canvas UI | Accepted |
 | [0002](./0002-lossless-openxml-model.md) | Lossless OpenXML editing via modelled + opaque content | Accepted |
+| [0003](./0003-text-shaping-and-rendering.md) | Text shaping, fonts and page rendering | Accepted |
