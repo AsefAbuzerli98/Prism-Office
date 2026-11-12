@@ -2,6 +2,7 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_sheetengine_free: (a: number, b: number) => void;
+export const profileLoad: (a: number, b: number) => [number, number];
 export const sheetengine_addChart: (a: number, b: number, c: number, d: number) => [number, number, number];
 export const sheetengine_addSheet: (a: number, b: number, c: number) => number;
 export const sheetengine_applyStyle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];

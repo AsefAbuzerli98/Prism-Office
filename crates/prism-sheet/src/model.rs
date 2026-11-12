@@ -7,13 +7,59 @@ use crate::addr::{CellRef, Rect};
 use crate::value::{ErrorKind, Value};
 use crate::workbook::{Cell, DefinedName, Input, Sheet, TableDef, Workbook};
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum CellValueModel {
     Bool(bool),
     Number(f64),
     Text(String),
     Error { e: String },
+}
+
+// Hand-written: `#[serde(untagged)]` tries each variant and builds an error
+// per miss, which dominated loading large workbooks.
+impl<'de> Deserialize<'de> for CellValueModel {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = CellValueModel;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a number, string, boolean or {\"e\": code}")
+            }
+            fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(CellValueModel::Bool(v))
+            }
+            fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E> {
+                Ok(CellValueModel::Number(v))
+            }
+            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E> {
+                Ok(CellValueModel::Number(v as f64))
+            }
+            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(CellValueModel::Number(v as f64))
+            }
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(CellValueModel::Text(v.to_string()))
+            }
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E> {
+                Ok(CellValueModel::Text(v))
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut m: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut e = None;
+                while let Some((k, v)) = m.next_entry::<String, serde_json::Value>()? {
+                    if k == "e" {
+                        e = v.as_str().map(String::from);
+                    }
+                }
+                e.map(|e| CellValueModel::Error { e })
+                    .ok_or_else(|| serde::de::Error::custom("expected {\"e\": code}"))
+            }
+        }
+        d.deserialize_any(V)
+    }
 }
 
 impl CellValueModel {
@@ -184,6 +230,13 @@ impl WorkbookModel {
 impl Workbook {
     /// Build an engine workbook from a model (marks all formulas dirty; call `recalc`).
     pub fn from_model(m: &WorkbookModel) -> Self {
+        let mut wb = Self::from_model_cells(m);
+        wb.mark_all_dirty();
+        wb
+    }
+
+    /// Cells and sheets only (no dependency graph yet).
+    pub fn from_model_cells(m: &WorkbookModel) -> Self {
         let mut wb = Workbook {
             num_formats: if m.num_formats.is_empty() {
                 vec!["General".into()]
@@ -211,23 +264,42 @@ impl Workbook {
             wb.sheets.push(Sheet::new("Sheet1"));
         }
         wb.reparse_names();
+        // filled-down formulas share one parsed tree
+        let mut shared: crate::fxhash::FxHashMap<
+            String,
+            (std::sync::Arc<crate::parser::Expr>, CellRef),
+        > = Default::default();
         for (si, sm) in m.sheets.iter().enumerate() {
             for c in &sm.cells {
                 let at = CellRef::new(c.r, c.c);
                 let cached = c.v.as_ref().map(|v| v.to_value()).unwrap_or_default();
                 let input = match &c.f {
-                    Some(f) => match crate::parser::parse(f, at) {
-                        Ok(e) => Input::Formula {
-                            text: f.clone(),
-                            expr: std::sync::Arc::new(e),
-                        },
-                        Err(_) => Input::Value(Value::text(format!("={f}"))),
-                    },
+                    Some(f) => {
+                        let key =
+                            crate::parser::relative_key(f, at).map(|k| format!("{si}\u{1}{k}"));
+                        match key.as_ref().and_then(|k| shared.get(k)) {
+                            Some((expr, base)) => Input::Formula {
+                                expr: expr.clone(),
+                                base: *base,
+                            },
+                            None => match crate::parser::parse(f, at) {
+                                Ok(e) => {
+                                    let expr = std::sync::Arc::new(e);
+                                    if let Some(k) = key {
+                                        shared.insert(k, (expr.clone(), at));
+                                    }
+                                    Input::Formula { expr, base: at }
+                                }
+                                Err(_) => Input::Value(Value::text(format!("={f}"))),
+                            },
+                        }
+                    }
                     None => Input::Value(cached.clone()),
                 };
                 let is_formula = matches!(input, Input::Formula { .. });
                 let sheet = &mut wb.sheets[si];
                 sheet.index_formula(at, is_formula);
+                sheet.touch();
                 sheet.cells.insert(
                     at,
                     Cell {
@@ -238,7 +310,6 @@ impl Workbook {
                 );
             }
         }
-        wb.mark_all_dirty();
         wb
     }
 
@@ -253,10 +324,10 @@ impl Workbook {
                         .cells
                         .iter()
                         .map(|(k, c)| match &c.input {
-                            Input::Formula { text, .. } => CellModel {
+                            f @ Input::Formula { .. } => CellModel {
                                 r: k.row,
                                 c: k.col,
-                                f: Some(text.clone()),
+                                f: f.formula_text(*k),
                                 v: CellValueModel::from_value(&c.value),
                                 s: c.style,
                             },

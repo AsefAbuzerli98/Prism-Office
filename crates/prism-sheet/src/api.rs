@@ -296,19 +296,24 @@ impl Engine {
 
     fn rewrite_formulas(&mut self, f: impl Fn(&crate::parser::Expr) -> crate::parser::Expr) {
         for s in &mut self.wb.sheets {
-            for (k, c) in s.cells.iter_mut() {
-                if let Input::Formula { text, expr } = &mut c.input {
-                    let e = f(expr);
-                    if e != **expr {
-                        *text = crate::parser::to_formula(
-                            &e,
-                            &crate::parser::WriteOptions {
-                                base: *k,
-                                ..Default::default()
-                            },
-                        );
-                        *expr = std::sync::Arc::new(e);
-                    }
+            // shared trees are rewritten once
+            let mut done: crate::fxhash::FxHashMap<usize, std::sync::Arc<crate::parser::Expr>> =
+                Default::default();
+            for c in s.cells.values_mut() {
+                if let Input::Formula { expr, .. } = &mut c.input {
+                    let key = std::sync::Arc::as_ptr(expr) as usize;
+                    let new = done
+                        .entry(key)
+                        .or_insert_with(|| {
+                            let e = f(expr);
+                            if e != **expr {
+                                std::sync::Arc::new(e)
+                            } else {
+                                expr.clone()
+                            }
+                        })
+                        .clone();
+                    *expr = new;
                 }
             }
         }
@@ -398,9 +403,12 @@ impl Engine {
                 let sc = src.c0 + (c - dst.c0) % w;
                 let from = CellRef::new(sr, sc);
                 let text = match self.wb.sheets[sheet].cells.get(&from).map(|x| &x.input) {
-                    Some(Input::Formula { expr, .. }) => {
-                        let moved =
-                            crate::parser::shift(expr, r as i64 - sr as i64, c as i64 - sc as i64);
+                    Some(Input::Formula { expr, base }) => {
+                        let moved = crate::parser::shift(
+                            expr,
+                            r as i64 - sr as i64 + sr as i64 - base.row as i64,
+                            c as i64 - sc as i64 + sc as i64 - base.col as i64,
+                        );
                         format!(
                             "={}",
                             crate::parser::to_formula(&moved, &Default::default())
@@ -447,8 +455,9 @@ impl Engine {
                 }
                 let cell = self.wb.sheets[src_sheet].cells.get(&from);
                 let text = match cell.map(|x| &x.input) {
-                    Some(Input::Formula { expr, .. }) => {
-                        let moved = crate::parser::shift(expr, tr - r as i64, tc - c as i64);
+                    Some(Input::Formula { expr, base }) => {
+                        let moved =
+                            crate::parser::shift(expr, tr - base.row as i64, tc - base.col as i64);
                         format!(
                             "={}",
                             crate::parser::to_formula(&moved, &Default::default())

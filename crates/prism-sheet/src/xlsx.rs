@@ -1310,8 +1310,12 @@ fn sheet_data(
         };
         let r = a1(*k);
         let xml = match &cell.input {
-            Input::Formula { expr, .. } => {
-                let ftext = esc(&parser::to_formula(expr, &opts));
+            Input::Formula { expr, base } => {
+                let offset = (
+                    k.row as i64 - base.row as i64,
+                    k.col as i64 - base.col as i64,
+                );
+                let ftext = esc(&parser::to_formula(expr, &WriteOptions { offset, ..opts }));
                 let shown = wb.value_at(si, *k);
                 let (t, v) = value_xml(&shown, sst, true);
                 let t = t.map(|t| format!(r#" t="{t}""#)).unwrap_or_default();

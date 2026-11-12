@@ -858,6 +858,8 @@ pub struct WriteOptions {
     /// Write references in R1C1 relative to `base`.
     pub r1c1: bool,
     pub base: CellRef,
+    /// Shift applied to relative references while writing (shared trees).
+    pub offset: (i64, i64),
 }
 
 fn quote_sheet(s: &str) -> String {
@@ -875,17 +877,70 @@ fn anchor_text(a: &Anchor, o: &WriteOptions) -> String {
     if o.r1c1 {
         r1c1(a.cell, o.base, a.row_abs, a.col_abs)
     } else {
-        format!(
-            "{}{}{}{}",
-            if a.col_abs { "$" } else { "" },
-            col_name(a.cell.col),
-            if a.row_abs { "$" } else { "" },
-            a.cell.row + 1
-        )
+        let mut s = String::with_capacity(10);
+        if a.col_abs {
+            s.push('$');
+        }
+        s.push_str(&col_name(a.cell.col));
+        if a.row_abs {
+            s.push('$');
+        }
+        push_u64(&mut s, a.cell.row as u64 + 1);
+        s
     }
 }
 
+/// Append a decimal integer without going through `fmt`.
+pub(crate) fn push_u64(s: &mut String, mut n: u64) {
+    let mut buf = [0u8; 20];
+    let mut i = buf.len();
+    loop {
+        i -= 1;
+        buf[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+        if n == 0 {
+            break;
+        }
+    }
+    s.push_str(std::str::from_utf8(&buf[i..]).unwrap());
+}
+
+pub(crate) fn push_i64(s: &mut String, n: i64) {
+    if n < 0 {
+        s.push('-');
+    }
+    push_u64(s, n.unsigned_abs());
+}
+
 pub fn ref_text(r: &RefExpr, o: &WriteOptions) -> String {
+    if o.offset != (0, 0) {
+        let (dr, dc) = o.offset;
+        let kind = match &r.kind {
+            RefKind::Cell(a) => shift_anchor(a, dr, dc).map(RefKind::Cell),
+            RefKind::Range(a, b) => shift_anchor(a, dr, dc)
+                .zip(shift_anchor(b, dr, dc))
+                .map(|(a, b)| RefKind::Range(a, b)),
+            RefKind::Cols(a, b) => shift_anchor(a, 0, dc)
+                .zip(shift_anchor(b, 0, dc))
+                .map(|(a, b)| RefKind::Cols(a, b)),
+            RefKind::Rows(a, b) => shift_anchor(a, dr, 0)
+                .zip(shift_anchor(b, dr, 0))
+                .map(|(a, b)| RefKind::Rows(a, b)),
+        };
+        return match kind {
+            Some(kind) => ref_text(
+                &RefExpr {
+                    sheet: r.sheet.clone(),
+                    kind,
+                },
+                &WriteOptions {
+                    offset: (0, 0),
+                    ..*o
+                },
+            ),
+            None => "#REF!".into(),
+        };
+    }
     let sheet = r
         .sheet
         .as_ref()
@@ -1067,7 +1122,7 @@ fn fmt(e: &Expr, o: &WriteOptions, scope: &[String]) -> String {
 
 // ---- shifting (fill, copy, shared formulas, row/column insert) ---------------------------
 
-fn shift_anchor(a: &Anchor, dr: i64, dc: i64) -> Option<Anchor> {
+pub(crate) fn shift_anchor(a: &Anchor, dr: i64, dc: i64) -> Option<Anchor> {
     let row = if a.row_abs {
         a.cell.row as i64
     } else {
@@ -1118,6 +1173,140 @@ pub fn shift(e: &Expr, dr: i64, dc: i64) -> Expr {
         Expr::Array(rows) => Expr::Array(rows.iter().map(|r| r.iter().map(s).collect()).collect()),
         other => other.clone(),
     }
+}
+
+/// A text key equal for formulas that differ only by relative position
+/// (`=A1*2` in B1 and `=A2*2` in B2), used to share parsed trees.
+/// Returns `None` when a cheap textual normalisation would be unsafe
+/// (whole-row/column ranges, R1C1-looking text).
+pub fn relative_key(text: &str, at: CellRef) -> Option<String> {
+    let b = text.as_bytes();
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut i = 0;
+    let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'.' || c == b'\\';
+    while i < b.len() {
+        let c = b[i];
+        if c == b'"' || c == b'\'' {
+            // copy quoted text / sheet names verbatim
+            let q = c;
+            let start = i;
+            i += 1;
+            while i < b.len() {
+                if b[i] == q {
+                    if i + 1 < b.len() && b[i + 1] == q {
+                        i += 2;
+                        continue;
+                    }
+                    break;
+                }
+                i += 1;
+            }
+            i = (i + 1).min(b.len());
+            out.push_str(&text[start..i]);
+            continue;
+        }
+        if c == b'[' {
+            // structured references: copy through the matching bracket
+            let start = i;
+            let mut depth = 0;
+            while i < b.len() {
+                match b[i] {
+                    b'[' => depth += 1,
+                    b']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            out.push_str(&text[start..i]);
+            continue;
+        }
+        let prev_ident = i > 0 && ident(b[i - 1]);
+        if !prev_ident && (c == b'$' || c.is_ascii_alphabetic()) {
+            // try $?COL$?ROW
+            let s = i;
+            let mut j = i;
+            let col_abs = b[j] == b'$';
+            if col_abs {
+                j += 1;
+            }
+            let c0 = j;
+            while j < b.len() && b[j].is_ascii_alphabetic() {
+                j += 1;
+            }
+            let letters = &text[c0..j];
+            let row_abs = j < b.len() && b[j] == b'$';
+            if row_abs {
+                j += 1;
+            }
+            let d0 = j;
+            while j < b.len() && b[j].is_ascii_digit() {
+                j += 1;
+            }
+            let digits = &text[d0..j];
+            let next = b.get(j).copied();
+            let is_ref = !letters.is_empty()
+                && letters.len() <= 3
+                && !digits.is_empty()
+                && !next.is_some_and(|n| ident(n) || n == b'(' || n == b'!');
+            if is_ref {
+                let col = crate::addr::col_index(letters)?;
+                let row: u32 = digits.parse::<u32>().ok()?.checked_sub(1)?;
+                if col_abs {
+                    out.push('C');
+                    push_u64(&mut out, col as u64);
+                } else {
+                    out.push_str("C[");
+                    push_i64(&mut out, col as i64 - at.col as i64);
+                    out.push(']');
+                }
+                if row_abs {
+                    out.push('R');
+                    push_u64(&mut out, row as u64);
+                } else {
+                    out.push_str("R[");
+                    push_i64(&mut out, row as i64 - at.row as i64);
+                    out.push(']');
+                }
+                i = j;
+                continue;
+            }
+            // whole rows/columns (A:C, 1:3) shift too, but are not normalised here
+            if (!letters.is_empty() && digits.is_empty() && next == Some(b':'))
+                || (letters.is_empty() && !digits.is_empty() && next == Some(b':'))
+            {
+                return None;
+            }
+            // copy the identifier as is
+            let mut k = s;
+            while k < b.len() && (ident(b[k]) || b[k] == b'$') {
+                k += 1;
+            }
+            out.push_str(&text[s..k.max(s + 1)]);
+            i = k.max(s + 1);
+            continue;
+        }
+        if c.is_ascii_digit() && !prev_ident {
+            // numbers (and row ranges like 1:3) — bail out on a row range
+            let s = i;
+            while i < b.len() && (b[i].is_ascii_digit() || b[i] == b'.') {
+                i += 1;
+            }
+            if b.get(i) == Some(&b':') {
+                return None;
+            }
+            out.push_str(&text[s..i]);
+            continue;
+        }
+        out.push(c as char);
+        i += 1;
+    }
+    Some(out)
 }
 
 /// Rebuild an expression with every reference mapped by `f`.

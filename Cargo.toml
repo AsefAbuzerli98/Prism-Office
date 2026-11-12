@@ -22,7 +22,7 @@ tempfile = "3"
 
 [profile.wasm]
 inherits = "release"
-opt-level = "z"
+opt-level = 3
 panic = "abort"
 strip = "debuginfo"
 

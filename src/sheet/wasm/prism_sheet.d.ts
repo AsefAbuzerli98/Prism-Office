@@ -52,11 +52,17 @@ export class SheetEngine {
     view(sheet: number, r0: number, c0: number, r1: number, c1: number): string;
 }
 
+/**
+ * Timing breakdown of loading a model (diagnostics).
+ */
+export function profileLoad(model_json: string): string;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_sheetengine_free: (a: number, b: number) => void;
+    readonly profileLoad: (a: number, b: number) => [number, number];
     readonly sheetengine_addChart: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly sheetengine_addSheet: (a: number, b: number, c: number) => number;
     readonly sheetengine_applyStyle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];

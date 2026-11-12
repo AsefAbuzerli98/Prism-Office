@@ -12,7 +12,9 @@
 //! * Spill rectangles that grow or shrink trigger another round so readers of
 //!   newly covered/uncovered cells and blocked neighbours update.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::BTreeSet;
+
+use crate::fxhash::FxHashMap as HashMap;
 
 use crate::addr::{CellRef, Rect, MAX_COLS, MAX_ROWS};
 use crate::eval::Ctx;
@@ -93,6 +95,13 @@ impl Graph {
     /// Formula cells whose precedents intersect `r` on sheet `s`.
     pub fn dependents(&self, s: usize, r: &Rect) -> Vec<Node> {
         let mut out = Vec::new();
+        self.dependents_into(s, r, &mut out);
+        out
+    }
+
+    /// [`Graph::dependents`] into a reusable buffer.
+    pub fn dependents_into(&self, s: usize, r: &Rect, out: &mut Vec<Node>) {
+        let start = out.len();
         let (rb0, rb1, cb0, cb1, count) = bucket_span(r);
         if count > 65_536 {
             for (n, deps) in &self.deps {
@@ -115,9 +124,15 @@ impl Graph {
                 .filter(|(_, ds, dr)| *ds == s && dr.intersects(r))
                 .map(|(n, _, _)| *n),
         );
-        out.sort_unstable();
-        out.dedup();
-        out
+        out[start..].sort_unstable();
+        let mut w = start;
+        for i in start..out.len() {
+            if i == start || out[i] != out[w - 1] {
+                out[w] = out[i];
+                w += 1;
+            }
+        }
+        out.truncate(w);
     }
 
     pub fn precedents(&self, n: Node) -> &[(usize, Rect)] {
@@ -125,7 +140,8 @@ impl Graph {
     }
 }
 
-/// Static precedents of an expression.
+/// Static precedents of an expression (`off`: shared-formula shift).
+#[allow(clippy::too_many_arguments)]
 fn collect(
     wb: &Workbook,
     sheet: usize,
@@ -134,43 +150,28 @@ fn collect(
     out: &mut Vec<(usize, Rect)>,
     volatile: &mut bool,
     depth: u32,
+    off: (i64, i64),
 ) {
     if depth > 32 {
         return;
     }
     let rec = |x: &Expr, out: &mut Vec<(usize, Rect)>, v: &mut bool| {
-        collect(wb, sheet, cell, x, out, v, depth + 1)
+        collect(wb, sheet, cell, x, out, v, depth + 1, off)
+    };
+    let rec0 = |x: &Expr, out: &mut Vec<(usize, Rect)>, v: &mut bool| {
+        collect(wb, sheet, cell, x, out, v, depth + 1, (0, 0))
     };
     match e {
         Expr::Ref(r) => {
-            let s = match &r.sheet {
-                Some(n) => match wb.sheet_index(n) {
-                    Some(i) => i,
-                    None => return,
-                },
-                None => sheet,
-            };
-            let rect = match &r.kind {
-                RefKind::Cell(a) => Rect::cell(a.cell),
-                RefKind::Range(a, b) => Rect::new(a.cell, b.cell),
-                RefKind::Cols(a, b) => Rect {
-                    r0: 0,
-                    r1: MAX_ROWS - 1,
-                    c0: a.cell.col.min(b.cell.col),
-                    c1: a.cell.col.max(b.cell.col),
-                },
-                RefKind::Rows(a, b) => Rect {
-                    r0: a.cell.row.min(b.cell.row),
-                    r1: a.cell.row.max(b.cell.row),
-                    c0: 0,
-                    c1: MAX_COLS - 1,
-                },
-            };
-            out.push((s, rect));
+            let mut ctx = Ctx::new(wb, sheet, cell, 0.0);
+            ctx.offset = off;
+            if let Some(rr) = ctx.resolve_ref(r) {
+                out.push((rr.sheet, rr.rect));
+            }
         }
         Expr::Name(n) => {
             if let Some(x) = wb.name_expr(n, sheet) {
-                rec(&x, out, volatile);
+                rec0(&x, out, volatile);
             }
         }
         Expr::Structured { table, .. } => {
@@ -185,7 +186,10 @@ fn collect(
         Expr::Spill(x) => {
             rec(x, out, volatile);
             if let Expr::Ref(r) = x.as_ref() {
-                if let RefKind::Cell(a) = &r.kind {
+                if let Some(a) = match &r.kind {
+                    RefKind::Cell(a) => crate::parser::shift_anchor(a, off.0, off.1),
+                    _ => None,
+                } {
                     let s = r
                         .sheet
                         .as_ref()
@@ -211,7 +215,7 @@ fn collect(
                 if let Some(Expr::Text(code)) = args.first() {
                     for r in crate::functions::logic::xl_refs(code) {
                         if let Ok(x) = crate::parser::parse(&r, cell) {
-                            rec(&x, out, volatile);
+                            rec0(&x, out, volatile);
                         }
                     }
                 }
@@ -230,13 +234,20 @@ fn collect(
 pub(crate) fn reindex(wb: &mut Workbook, sheet: usize, c: CellRef) {
     let n = (sheet, c);
     wb.graph.remove(n);
-    let Some(Input::Formula { expr, .. }) = wb.sheets[sheet].cells.get(&c).map(|x| &x.input) else {
+    let Some(Input::Formula { expr, base }) = wb.sheets[sheet].cells.get(&c).map(|x| &x.input)
+    else {
         return;
     };
-    let expr = expr.clone();
+    let (expr, off) = (
+        expr.clone(),
+        (
+            c.row as i64 - base.row as i64,
+            c.col as i64 - base.col as i64,
+        ),
+    );
     let mut deps = Vec::new();
     let mut volatile = false;
-    collect(wb, sheet, c, &expr, &mut deps, &mut volatile, 0);
+    collect(wb, sheet, c, &expr, &mut deps, &mut volatile, 0, off);
     deps.sort_by_key(|(s, r)| (*s, r.r0, r.c0, r.r1, r.c1));
     deps.dedup();
     wb.graph.insert(n, deps, volatile);
@@ -262,20 +273,18 @@ fn finalize(ctx: &Ctx, v: Value) -> Value {
 }
 
 fn eval_node(wb: &Workbook, n: Node, now: f64) -> (Node, Value, Vec<AsyncRequest>) {
-    let Some(Input::Formula { expr, .. }) = wb.sheets[n.0].cells.get(&n.1).map(|c| &c.input) else {
+    let Some(Input::Formula { expr, base }) = wb.sheets[n.0].cells.get(&n.1).map(|c| &c.input)
+    else {
         return (n, Value::Empty, vec![]);
     };
     let mut ctx = Ctx::new(wb, n.0, n.1, now);
+    ctx.offset = (
+        n.1.row as i64 - base.row as i64,
+        n.1.col as i64 - base.col as i64,
+    );
     let v = ctx.eval(expr);
     let v = finalize(&ctx, v);
     (n, v, ctx.requests)
-}
-
-fn outputs(wb: &Workbook, n: Node) -> Vec<Rect> {
-    let s = &wb.sheets[n.0];
-    let mut v = vec![Rect::cell(n.1)];
-    v.extend(s.spills.get(&n.1).copied());
-    v
 }
 
 impl Workbook {
@@ -339,76 +348,107 @@ impl Workbook {
         now: f64,
         report: &mut Recalc,
     ) -> (Vec<(usize, Rect)>, Vec<Node>) {
-        let mut nodes: HashSet<Node> = HashSet::new();
-        let mut edges: HashSet<(Node, Node)> = HashSet::new();
-        let mut queue: Vec<(usize, Rect, Option<Node>)> = Vec::new();
+        // dirty nodes get dense ids; edges are a flat list turned into CSR
+        let mut ids: HashMap<Node, u32> = HashMap::default();
+        let mut list: Vec<Node> = Vec::new();
+        let mut edges: Vec<(u32, u32)> = Vec::new();
+        let mut queue: Vec<(usize, Rect, Option<u32>)> = Vec::new();
+        let mut deps_buf: Vec<Node> = Vec::new();
         let is_formula = |wb: &Workbook, n: Node| {
             matches!(
                 wb.sheets[n.0].cells.get(&n.1).map(|c| &c.input),
                 Some(Input::Formula { .. })
             )
         };
+        // returns (id, newly added)
+        fn add(ids: &mut HashMap<Node, u32>, list: &mut Vec<Node>, n: Node) -> (u32, bool) {
+            if let Some(&i) = ids.get(&n) {
+                return (i, false);
+            }
+            let i = list.len() as u32;
+            ids.insert(n, i);
+            list.push(n);
+            (i, true)
+        }
+        let push_outputs =
+            |wb: &Workbook, queue: &mut Vec<(usize, Rect, Option<u32>)>, n: Node, id: u32| {
+                queue.push((n.0, Rect::cell(n.1), Some(id)));
+                if let Some(sp) = wb.sheets[n.0].spills.get(&n.1) {
+                    queue.push((n.0, *sp, Some(id)));
+                }
+            };
         for &(s, r) in seeds {
             report.changed.push((s, r));
             // edits inside a spill (or a blocked spill area) re-evaluate its anchor
             let sh = &self.sheets[s];
-            for (a, sr) in sh.spills.iter().chain(sh.blocked.iter()) {
-                if sr.intersects(&r) && nodes.insert((s, *a)) {
-                    queue.push((s, Rect::cell(*a), Some((s, *a))));
-                    for o in outputs(self, (s, *a)) {
-                        queue.push((s, o, Some((s, *a))));
-                    }
+            let anchors: Vec<CellRef> = sh
+                .spills
+                .iter()
+                .chain(sh.blocked.iter())
+                .filter(|(_, sr)| sr.intersects(&r))
+                .map(|(a, _)| *a)
+                .collect();
+            for a in anchors {
+                let (id, fresh) = add(&mut ids, &mut list, (s, a));
+                if fresh {
+                    push_outputs(self, &mut queue, (s, a), id);
                 }
             }
             if r.rows() == 1 && r.cols() == 1 && is_formula(self, (s, r.start())) {
                 let n = (s, r.start());
-                if nodes.insert(n) {
-                    for o in outputs(self, n) {
-                        queue.push((s, o, Some(n)));
-                    }
+                let (id, fresh) = add(&mut ids, &mut list, n);
+                if fresh {
+                    push_outputs(self, &mut queue, n, id);
                 }
             } else {
                 queue.push((s, r, None));
             }
         }
         for &n in extra {
-            if is_formula(self, n) && nodes.insert(n) {
-                for o in outputs(self, n) {
-                    queue.push((n.0, o, Some(n)));
+            if is_formula(self, n) {
+                let (id, fresh) = add(&mut ids, &mut list, n);
+                if fresh {
+                    push_outputs(self, &mut queue, n, id);
                 }
             }
         }
         while let Some((s, r, from)) = queue.pop() {
-            for d in self.graph.dependents(s, &r) {
+            deps_buf.clear();
+            self.graph.dependents_into(s, &r, &mut deps_buf);
+            for &d in &deps_buf {
+                let (id, fresh) = add(&mut ids, &mut list, d);
                 if let Some(f) = from {
-                    edges.insert((f, d));
+                    edges.push((f, id));
                 }
-                if nodes.insert(d) {
-                    for o in outputs(self, d) {
-                        queue.push((d.0, o, Some(d)));
-                    }
+                if fresh {
+                    push_outputs(self, &mut queue, d, id);
                 }
             }
         }
-        // Kahn levels
-        let mut indeg: HashMap<Node, usize> = nodes.iter().map(|n| (*n, 0)).collect();
-        let mut adj: HashMap<Node, Vec<Node>> = HashMap::new();
-        for (a, b) in &edges {
-            if nodes.contains(a) && nodes.contains(b) {
-                *indeg.get_mut(b).unwrap() += 1;
-                adj.entry(*a).or_default().push(*b);
-            }
+        drop(ids);
+        edges.sort_unstable();
+        edges.dedup();
+        let n_nodes = list.len();
+        let mut indeg = vec![0u32; n_nodes];
+        let mut start = vec![0u32; n_nodes + 1];
+        for &(a, b) in &edges {
+            indeg[b as usize] += 1;
+            start[a as usize + 1] += 1;
         }
-        let mut level: Vec<Node> = indeg
-            .iter()
-            .filter(|(_, d)| **d == 0)
-            .map(|(n, _)| *n)
+        for i in 0..n_nodes {
+            start[i + 1] += start[i];
+        }
+        let targets: Vec<u32> = edges.iter().map(|e| e.1).collect();
+        drop(edges);
+        let mut level: Vec<u32> = (0..n_nodes as u32)
+            .filter(|&i| indeg[i as usize] == 0)
             .collect();
-        level.sort_unstable();
+        level.sort_unstable_by_key(|&i| list[i as usize]);
         let mut done = 0usize;
         let mut follow: Vec<(usize, Rect)> = Vec::new();
         while !level.is_empty() {
-            let results = self.eval_level(&level, now);
+            let level_nodes: Vec<Node> = level.iter().map(|&i| list[i as usize]).collect();
+            let results = self.eval_level(&level_nodes, now);
             report.evaluated += results.len();
             for (n, v, reqs) in results {
                 self.async_requests
@@ -432,26 +472,23 @@ impl Workbook {
             }
             done += level.len();
             let mut next = Vec::new();
-            for n in &level {
-                if let Some(v) = adj.get(n) {
-                    for m in v {
-                        let d = indeg.get_mut(m).unwrap();
-                        *d -= 1;
-                        if *d == 0 {
-                            next.push(*m);
-                        }
+            for &i in &level {
+                for &m in &targets[start[i as usize] as usize..start[i as usize + 1] as usize] {
+                    let d = &mut indeg[m as usize];
+                    *d -= 1;
+                    if *d == 0 {
+                        next.push(m);
                     }
                 }
             }
-            next.sort_unstable();
+            next.sort_unstable_by_key(|&i| list[i as usize]);
             level = next;
         }
-        if done < nodes.len() {
+        if done < n_nodes {
             // cycle: Excel shows 0 for unresolved circular references
-            let mut stuck: Vec<Node> = indeg
-                .into_iter()
-                .filter(|(_, d)| *d > 0)
-                .map(|(n, _)| n)
+            let mut stuck: Vec<Node> = (0..n_nodes)
+                .filter(|&i| indeg[i] > 0)
+                .map(|i| list[i])
                 .collect();
             stuck.sort_unstable();
             for n in stuck {
@@ -551,6 +588,7 @@ impl Workbook {
                     }
                 }
                 sh.spills.insert(c, rect);
+                sh.touch();
                 new = Some(rect);
             }
         }

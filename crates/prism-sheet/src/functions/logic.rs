@@ -102,7 +102,9 @@ fn py(ctx: &mut Ctx, args: &[Expr]) -> Value {
         let Ok(e) = crate::parser::parse(&r, ctx.cell) else {
             return err(ErrorKind::Ref);
         };
+        let saved = std::mem::take(&mut ctx.offset);
         let v = ctx.eval(&e);
+        ctx.offset = saved;
         let a = ctx.array(v);
         let rows = (0..a.rows)
             .map(|i| a.row_values(i).iter().map(json_of).collect())

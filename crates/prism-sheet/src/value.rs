@@ -123,6 +123,8 @@ pub struct Lambda {
     pub body: Rc<crate::parser::Expr>,
     /// Captured LET/LAMBDA bindings.
     pub env: Rc<Vec<(String, Value)>>,
+    /// Reference shift of the formula the lambda was created in.
+    pub offset: (i64, i64),
 }
 
 impl PartialEq for Lambda {
@@ -196,6 +198,11 @@ pub fn format_number_roundtrip(n: f64) -> String {
 pub fn format_number(n: f64) -> String {
     if n == 0.0 {
         return "0".into();
+    }
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        let mut s = String::with_capacity(16);
+        crate::parser::push_i64(&mut s, n as i64);
+        return s;
     }
     if !n.is_finite() {
         return "#NUM!".into();

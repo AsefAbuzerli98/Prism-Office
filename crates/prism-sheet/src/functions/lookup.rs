@@ -349,10 +349,15 @@ fn indirect(ctx: &mut Ctx, args: &[Expr]) -> Value {
             | Expr::Name(_)
             | Expr::Structured { .. }
             | Expr::Binary(crate::parser::BinOp::Range, ..)),
-        ) => match ctx.eval(&e) {
-            v @ Value::Ref(_) => v,
-            _ => err(ErrorKind::Ref),
-        },
+        ) => {
+            let saved = std::mem::take(&mut ctx.offset);
+            let v = ctx.eval(&e);
+            ctx.offset = saved;
+            match v {
+                v @ Value::Ref(_) => v,
+                _ => err(ErrorKind::Ref),
+            }
+        }
         _ => err(ErrorKind::Ref),
     }
 }
@@ -594,9 +599,10 @@ pub fn call(ctx: &mut Ctx, name: &str, args: &[Expr]) -> Option<Value> {
                 .get(&r.rect.start())
                 .map(|c| &c.input)
             {
-                Some(crate::workbook::Input::Formula { text, .. }) => {
-                    Value::text(format!("={text}"))
-                }
+                Some(f @ crate::workbook::Input::Formula { .. }) => Value::text(format!(
+                    "={}",
+                    f.formula_text(r.rect.start()).unwrap_or_default()
+                )),
                 _ => err(ErrorKind::NA),
             },
             _ => err(ErrorKind::NA),

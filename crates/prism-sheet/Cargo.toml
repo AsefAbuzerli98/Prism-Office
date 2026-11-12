@@ -23,6 +23,9 @@ thiserror.workspace = true
 regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
 wasm-bindgen = { version = "=0.2.130", optional = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+dlmalloc = { version = "0.2", default-features = false }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon = "1"
 

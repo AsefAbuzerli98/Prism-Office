@@ -484,3 +484,97 @@ fn large_parallel_recalc() {
     assert_eq!(r.evaluated, 2);
     assert_eq!(wb.get(0, "C1"), n(2000.0 * 2001.0 - 10.0));
 }
+
+#[test]
+fn shared_formula_trees_from_model() {
+    use prism_sheet::model::{CellModel, CellValueModel, SheetModel, WorkbookModel};
+    let mut cells = vec![];
+    for r in 0..50u32 {
+        cells.push(CellModel {
+            r,
+            c: 0,
+            f: None,
+            v: Some(CellValueModel::Number(r as f64)),
+            s: 0,
+        });
+        cells.push(CellModel {
+            r,
+            c: 1,
+            f: Some(format!("A{}*2+$A$1+SUM($A$1:A{})", r + 1, r + 1)),
+            v: None,
+            s: 0,
+        });
+        cells.push(CellModel {
+            r,
+            c: 2,
+            f: Some(format!("LOG10(10)+Data!A{}", r + 1)),
+            v: None,
+            s: 0,
+        });
+        cells.push(CellModel {
+            r,
+            c: 3,
+            f: Some("SUM(A:A)".into()),
+            v: None,
+            s: 0,
+        });
+    }
+    let data = SheetModel {
+        name: "Data".into(),
+        cells: (0..50u32)
+            .map(|r| CellModel {
+                r,
+                c: 0,
+                f: None,
+                v: Some(CellValueModel::Number(100.0)),
+                s: 0,
+            })
+            .collect(),
+        ..Default::default()
+    };
+    let m = WorkbookModel {
+        sheets: vec![
+            SheetModel {
+                name: "S".into(),
+                cells,
+                ..Default::default()
+            },
+            data,
+        ],
+        num_formats: vec!["General".into()],
+        ..Default::default()
+    };
+    let mut wb = Workbook::from_model(&m);
+    wb.recalc(NOW);
+    assert_eq!(wb.get(0, "B10"), n(9.0 * 2.0 + 45.0));
+    assert_eq!(wb.get(0, "C7"), n(101.0));
+    assert_eq!(wb.get(0, "D50"), n(1225.0));
+    assert_eq!(
+        wb.input_text(0, prism_sheet::CellRef::new(9, 1)),
+        "=A10*2+$A$1+SUM($A$1:A10)"
+    );
+    // dependencies follow the shifted references
+    wb.set(0, "A10", "100", NOW).unwrap();
+    assert_eq!(wb.get(0, "B10"), n(200.0 + 45.0 - 9.0 + 100.0));
+    assert_eq!(wb.get(0, "B9"), n(8.0 * 2.0 + 36.0));
+    assert_eq!(m.sheets[0].cells.len(), wb.to_model().sheets[0].cells.len());
+    assert_eq!(
+        wb.to_model().sheets[0].cells[4 * 20 + 1].f.as_deref(),
+        Some("A21*2+$A$1+SUM($A$1:A21)")
+    );
+}
+
+#[test]
+fn relative_keys() {
+    use prism_sheet::{parser::relative_key, CellRef};
+    let k = |t: &str, r, c| relative_key(t, CellRef::new(r, c));
+    assert_eq!(k("A1*2", 0, 1), k("A2*2", 1, 1));
+    assert_ne!(k("A1*2", 0, 1), k("A1*2", 1, 1));
+    assert_eq!(k("$A$1+A1", 0, 1), k("$A$1+A2", 1, 1));
+    assert_eq!(k("LOG10(B1)", 0, 0), k("LOG10(B2)", 1, 0));
+    assert_eq!(k("\"A1\"&B1", 0, 0), k("\"A1\"&B2", 1, 0));
+    assert_ne!(k("\"A1\"&B1", 0, 0), k("\"A2\"&B2", 1, 0));
+    assert_eq!(k("Sheet1!A1", 0, 0), k("Sheet1!A2", 1, 0));
+    assert_eq!(k("SUM(A:A)", 0, 0), None);
+    assert_eq!(k("SUM(1:3)", 0, 0), None);
+}

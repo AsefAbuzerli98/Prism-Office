@@ -1,6 +1,8 @@
 //! Workbook model: sheets, sparse cells, spills, tables and defined names.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+use crate::fxhash::FxHashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -13,7 +15,47 @@ use crate::value::{ErrorKind, Value};
 #[derive(Clone, Debug, PartialEq)]
 pub enum Input {
     Value(Value),
-    Formula { text: String, expr: Arc<Expr> },
+    /// `expr` is written relative to `base`; cells filled with the same
+    /// relative formula share one tree (like Excel's shared formulas).
+    Formula {
+        expr: Arc<Expr>,
+        base: CellRef,
+    },
+}
+
+impl Input {
+    /// The formula as it reads in cell `at` (references shifted from `base`).
+    pub fn expr_at(&self, at: CellRef) -> Option<std::borrow::Cow<'_, Expr>> {
+        let Input::Formula { expr, base } = self else {
+            return None;
+        };
+        if *base == at {
+            return Some(std::borrow::Cow::Borrowed(expr.as_ref()));
+        }
+        Some(std::borrow::Cow::Owned(parser::shift(
+            expr,
+            at.row as i64 - base.row as i64,
+            at.col as i64 - base.col as i64,
+        )))
+    }
+
+    /// Formula text (without `=`) as shown in cell `at`.
+    pub fn formula_text(&self, at: CellRef) -> Option<String> {
+        let Input::Formula { expr, base } = self else {
+            return None;
+        };
+        let offset = (
+            at.row as i64 - base.row as i64,
+            at.col as i64 - base.col as i64,
+        );
+        Some(parser::to_formula(
+            expr,
+            &parser::WriteOptions {
+                offset,
+                ..Default::default()
+            },
+        ))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -42,11 +84,11 @@ pub struct Sheet {
     /// Formula cells by column → rows (dependency queries).
     pub(crate) formulas: BTreeMap<u32, BTreeSet<u32>>,
     /// Spill anchor → occupied rect (successful spills).
-    pub spills: HashMap<CellRef, Rect>,
+    pub spills: FxHashMap<CellRef, Rect>,
     /// Anchor → rect it wanted but could not take (#SPILL!).
-    pub blocked: HashMap<CellRef, Rect>,
+    pub blocked: FxHashMap<CellRef, Rect>,
     /// Spilled cell → anchor.
-    pub spill_owner: HashMap<CellRef, CellRef>,
+    pub spill_owner: FxHashMap<CellRef, CellRef>,
     pub tables: Vec<TableDef>,
     pub charts: Vec<crate::model::ChartDef>,
     pub col_widths: BTreeMap<u32, f64>,
@@ -57,6 +99,8 @@ pub struct Sheet {
     pub hidden: bool,
     /// Index of the worksheet in the source file (XLSX round-trip).
     pub source: Option<usize>,
+    /// Lazily computed bounding box of content (reset on every mutation).
+    pub(crate) used: std::sync::OnceLock<Option<Rect>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -185,6 +229,32 @@ impl Sheet {
 
     /// Bounding box of cells with content (including spills).
     pub fn used_rect(&self) -> Option<Rect> {
+        *self.used.get_or_init(|| self.compute_used())
+    }
+
+    /// Extend the cached used rectangle by a newly occupied cell.
+    pub(crate) fn grow(&mut self, c: CellRef) {
+        match self.used.get().copied() {
+            Some(Some(r)) => {
+                let n = Rect {
+                    r0: r.r0.min(c.row),
+                    c0: r.c0.min(c.col),
+                    r1: r.r1.max(c.row),
+                    c1: r.c1.max(c.col),
+                };
+                self.used = std::sync::OnceLock::from(Some(n));
+            }
+            Some(None) => self.used = std::sync::OnceLock::from(Some(Rect::cell(c))),
+            None => {}
+        }
+    }
+
+    /// Forget the cached used rectangle after a mutation.
+    pub(crate) fn touch(&mut self) {
+        self.used = std::sync::OnceLock::new();
+    }
+
+    fn compute_used(&self) -> Option<Rect> {
         let mut it = self
             .cells
             .keys()
@@ -278,7 +348,9 @@ impl Workbook {
             .and_then(|s| s.cells.get(&c))
             .map(|x| &x.input)
         {
-            Some(Input::Formula { text, .. }) => format!("={text}"),
+            Some(f @ Input::Formula { .. }) => {
+                format!("={}", f.formula_text(c).unwrap_or_default())
+            }
             Some(Input::Value(Value::Text(t))) => {
                 // keep text that would otherwise re-parse as a number visibly text
                 if t.starts_with('=')
@@ -310,8 +382,8 @@ impl Workbook {
         let input = if let Some(f) = text.strip_prefix('=').filter(|f| !f.trim().is_empty()) {
             let expr = parser::parse(f, c)?;
             Input::Formula {
-                text: f.trim().to_string(),
                 expr: Arc::new(expr),
+                base: c,
             }
         } else {
             let v = parse_literal(text);
@@ -336,6 +408,7 @@ impl Workbook {
         if !is_formula {
             Self::drop_spill(s, c);
         }
+        s.grow(c);
         s.cells.insert(
             c,
             Cell {
@@ -353,12 +426,14 @@ impl Workbook {
         s.index_formula(c, false);
         Self::drop_spill(s, c);
         s.cells.remove(&c);
+        s.touch();
         self.pending.insert((sheet, c));
         crate::calc::reindex(self, sheet, c);
     }
 
     pub(crate) fn drop_spill(s: &mut Sheet, anchor: CellRef) {
         if let Some(r) = s.spills.remove(&anchor) {
+            s.touch();
             for row in r.r0..=r.r1 {
                 for col in r.c0..=r.c1 {
                     let k = CellRef::new(row, col);
@@ -376,6 +451,7 @@ impl Workbook {
         match s.cells.get_mut(&c) {
             Some(cell) => cell.style = style,
             None if style != 0 => {
+                s.touch();
                 s.cells.insert(
                     c,
                     Cell {

@@ -469,6 +469,26 @@ export class SheetEngine {
     }
 }
 if (Symbol.dispose) SheetEngine.prototype[Symbol.dispose] = SheetEngine.prototype.free;
+
+/**
+ * Timing breakdown of loading a model (diagnostics).
+ * @param {string} model_json
+ * @returns {string}
+ */
+export function profileLoad(model_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(model_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.profileLoad(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -478,6 +498,10 @@ function __wbg_get_imports() {
         },
         __wbg___wbindgen_throw_4c88d8bf264fd984: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
+        },
+        __wbg_now_b66ab5cb701a7095: function() {
+            const ret = Date.now();
+            return ret;
         },
         __wbindgen_init_externref_table: function() {
             const table = wasm.__wbindgen_externrefs;

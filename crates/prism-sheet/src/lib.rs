@@ -11,12 +11,15 @@ pub mod calc;
 pub mod chart;
 pub mod eval;
 pub mod functions;
+pub mod fxhash;
 pub mod model;
 pub mod numfmt;
 pub mod parser;
 pub mod value;
 #[cfg(feature = "wasm")]
 pub mod wasm;
+#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
+mod wasm_alloc;
 pub mod workbook;
 #[cfg(feature = "xlsx")]
 pub mod xlsx;

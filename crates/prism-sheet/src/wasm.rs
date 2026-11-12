@@ -274,3 +274,25 @@ pub fn json_to_value(v: &serde_json::Value) -> crate::value::Value {
             .unwrap_or(Value::Error(crate::value::ErrorKind::Value)),
     }
 }
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = Date)]
+    fn now() -> f64;
+}
+
+/// Timing breakdown of loading a model (diagnostics).
+#[wasm_bindgen(js_name = profileLoad)]
+pub fn profile_load(model_json: &str) -> String {
+    let t0 = now();
+    let m: WorkbookModel =
+        serde_json::from_str(model_json).unwrap_or_else(|_| WorkbookModel::blank());
+    let t1 = now();
+    let mut wb = crate::workbook::Workbook::from_model_cells(&m);
+    let t15 = now();
+    wb.mark_all_dirty();
+    let t2 = now();
+    let r = wb.recalc(45000.0);
+    let t3 = now();
+    format!("parse {:.0} ms, cells {:.0} ms, graph {:.0} ms, from_model {:.0} ms, recalc {:.0} ms ({} evaluated)", t1 - t0, t15 - t1, t2 - t15, t2 - t1, t3 - t2, r.evaluated)
+}

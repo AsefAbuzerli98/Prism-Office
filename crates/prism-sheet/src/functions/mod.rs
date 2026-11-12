@@ -78,7 +78,19 @@ pub(crate) fn numbers(ctx: &mut Ctx, args: &[Expr]) -> Res<Vec<f64>> {
             continue;
         }
         let raw = ctx.eval(a);
-        let from_range = matches!(raw, Value::Ref(_) | Value::Array(_));
+        if let Value::Ref(r) = &raw {
+            // fast path: stream the range instead of building an array
+            ctx.visit_range(r, |v| {
+                match v {
+                    Value::Number(n) => out.push(*n),
+                    Value::Error(e) => return Err(*e),
+                    _ => {}
+                }
+                Ok(())
+            })?;
+            continue;
+        }
+        let from_range = matches!(raw, Value::Array(_));
         match ctx.deref(raw) {
             Value::Array(arr) => {
                 for v in &arr.data {

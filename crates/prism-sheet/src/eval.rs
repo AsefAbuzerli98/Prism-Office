@@ -19,6 +19,9 @@ pub struct Ctx<'a> {
     pub rng: u64,
     pub requests: Vec<AsyncRequest>,
     pub depth: u32,
+    /// Shift applied to relative references (shared formula trees are
+    /// written relative to their first cell).
+    pub offset: (i64, i64),
 }
 
 pub type Res<T> = Result<T, ErrorKind>;
@@ -35,6 +38,7 @@ impl<'a> Ctx<'a> {
             rng: seed | 1,
             requests: Vec::new(),
             depth: 0,
+            offset: (0, 0),
         }
     }
 
@@ -139,6 +143,35 @@ impl<'a> Ctx<'a> {
             Some(s) => self.wb.sheet_index(s)?,
             None => self.sheet,
         };
+        let (dr, dc) = self.offset;
+        if (dr, dc) != (0, 0) {
+            let sh = |a: &crate::parser::Anchor, dr: i64, dc: i64| {
+                crate::parser::shift_anchor(a, dr, dc).map(|x| x.cell)
+            };
+            let rect = match &r.kind {
+                RefKind::Cell(a) => Rect::cell(sh(a, dr, dc)?),
+                RefKind::Range(a, b) => Rect::new(sh(a, dr, dc)?, sh(b, dr, dc)?),
+                RefKind::Cols(a, b) => {
+                    let (x, y) = (sh(a, 0, dc)?.col, sh(b, 0, dc)?.col);
+                    Rect {
+                        r0: 0,
+                        r1: MAX_ROWS - 1,
+                        c0: x.min(y),
+                        c1: x.max(y),
+                    }
+                }
+                RefKind::Rows(a, b) => {
+                    let (x, y) = (sh(a, dr, 0)?.row, sh(b, dr, 0)?.row);
+                    Rect {
+                        r0: x.min(y),
+                        r1: x.max(y),
+                        c0: 0,
+                        c1: MAX_COLS - 1,
+                    }
+                }
+            };
+            return Some(RangeRef { sheet, rect });
+        }
         let rect = match &r.kind {
             RefKind::Cell(a) => Rect::cell(a.cell),
             RefKind::Range(a, b) => Rect::new(a.cell, b.cell),
@@ -243,7 +276,9 @@ impl<'a> Ctx<'a> {
                 return Value::Error(ErrorKind::Calc);
             }
             self.depth += 1;
+            let saved = std::mem::take(&mut self.offset);
             let v = self.eval(&e);
+            self.offset = saved;
             self.depth -= 1;
             return v;
         }
@@ -270,7 +305,9 @@ impl<'a> Ctx<'a> {
             self.env.push((p.clone(), v));
         }
         self.depth += 1;
+        let saved_off = std::mem::replace(&mut self.offset, l.offset);
         let v = self.eval(&l.body);
+        self.offset = saved_off;
         self.depth -= 1;
         self.env = saved;
         v
@@ -281,6 +318,7 @@ impl<'a> Ctx<'a> {
             params,
             body: Arc::new(body.clone()),
             env: Arc::new(self.env.clone()),
+            offset: self.offset,
         }))
     }
 
@@ -339,13 +377,104 @@ impl<'a> Ctx<'a> {
     }
 
     pub fn range_array(&self, sheet: usize, rect: &Rect) -> Array {
-        let mut data = Vec::with_capacity(rect.size() as usize);
-        for row in rect.r0..=rect.r1 {
-            for col in rect.c0..=rect.c1 {
-                data.push(self.wb.value_at(sheet, CellRef::new(row, col)));
+        let (rows, cols) = (rect.rows() as usize, rect.cols() as usize);
+        let Some(sh) = self.wb.sheets.get(sheet) else {
+            return Array::filled(rows, cols, Value::Error(ErrorKind::Ref));
+        };
+        // small blocks: direct lookups; large ones: walk the stored cells once
+        if rect.size() <= 64 {
+            let mut data = Vec::with_capacity(rows * cols);
+            for row in rect.r0..=rect.r1 {
+                for col in rect.c0..=rect.c1 {
+                    data.push(self.wb.value_at(sheet, CellRef::new(row, col)));
+                }
+            }
+            return Array::new(rows, cols, data);
+        }
+        let mut data = vec![Value::Empty; rows * cols];
+        let at = |k: CellRef| (k.row - rect.r0) as usize * cols + (k.col - rect.c0) as usize;
+        let band = sh
+            .cells
+            .range(CellRef::new(rect.r0, 0)..=CellRef::new(rect.r1, u32::MAX));
+        for (k, cell) in band {
+            if k.col < rect.c0 || k.col > rect.c1 {
+                continue;
+            }
+            data[at(*k)] = match &cell.value {
+                Value::Array(a) => a.data.first().cloned().unwrap_or_default(),
+                v => v.clone(),
+            };
+        }
+        for (anchor, sr) in &sh.spills {
+            if !sr.intersects(rect) {
+                continue;
+            }
+            let Some(Value::Array(a)) = sh.cells.get(anchor).map(|c| &c.value) else {
+                continue;
+            };
+            for r in sr.r0.max(rect.r0)..=sr.r1.min(rect.r1) {
+                for c in sr.c0.max(rect.c0)..=sr.c1.min(rect.c1) {
+                    let k = CellRef::new(r, c);
+                    if k == *anchor || sh.cells.contains_key(&k) {
+                        continue;
+                    }
+                    let (dr, dc) = ((r - anchor.row) as usize, (c - anchor.col) as usize);
+                    if dr < a.rows && dc < a.cols {
+                        data[at(k)] = a.get(dr, dc).clone();
+                    }
+                }
             }
         }
-        Array::new(rect.rows() as usize, rect.cols() as usize, data)
+        Array::new(rows, cols, data)
+    }
+
+    /// Visit the non-empty values of a range without materialising it.
+    pub fn visit_range(&self, r: &RangeRef, mut f: impl FnMut(&Value) -> Res<()>) -> Res<()> {
+        let rect = self.trim_rect(r);
+        let Some(sh) = self.wb.sheets.get(r.sheet) else {
+            return Err(ErrorKind::Ref);
+        };
+        if rect.size() <= 64 {
+            for row in rect.r0..=rect.r1 {
+                for col in rect.c0..=rect.c1 {
+                    f(&self.wb.value_at(r.sheet, CellRef::new(row, col)))?;
+                }
+            }
+            return Ok(());
+        }
+        for (k, cell) in sh
+            .cells
+            .range(CellRef::new(rect.r0, 0)..=CellRef::new(rect.r1, u32::MAX))
+        {
+            if k.col < rect.c0 || k.col > rect.c1 {
+                continue;
+            }
+            match &cell.value {
+                Value::Array(a) => f(a.data.first().unwrap_or(&Value::Empty))?,
+                v => f(v)?,
+            }
+        }
+        for (anchor, sr) in &sh.spills {
+            if !sr.intersects(&rect) {
+                continue;
+            }
+            let Some(Value::Array(a)) = sh.cells.get(anchor).map(|c| &c.value) else {
+                continue;
+            };
+            for row in sr.r0.max(rect.r0)..=sr.r1.min(rect.r1) {
+                for col in sr.c0.max(rect.c0)..=sr.c1.min(rect.c1) {
+                    let k = CellRef::new(row, col);
+                    if k == *anchor || sh.cells.contains_key(&k) {
+                        continue;
+                    }
+                    let (dr, dc) = ((row - anchor.row) as usize, (col - anchor.col) as usize);
+                    if dr < a.rows && dc < a.cols {
+                        f(a.get(dr, dc))?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Any value as an array (scalars become 1×1).

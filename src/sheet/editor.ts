@@ -12,8 +12,9 @@ import { loadEngine, Workbook, type AsyncRequest, type Change, type ChartData, t
 import { a1, Axis, colChars, colName, colPx, DEFAULT_COL_PX, DEFAULT_ROW_PX, MAX_COLS, MAX_ROWS, parseRange, rowPt, rowPx, tokenAt } from "./geometry";
 import type { CellStyle, ChartDef, ChartKind, Rect } from "./model";
 
-const HDR_W = 46;
+const HDR_W_MIN = 46;
 const HDR_H = 22;
+const MAX_SCROLL_PX = 10_000_000;
 const ACCENT = MODES.workbook.accent;
 
 export interface DataConnection {
@@ -209,8 +210,8 @@ export class SheetEditor implements EngineView {
     const used = s.used;
     this.vRows = Math.min(MAX_ROWS, Math.max(this.vRows, (used?.r1 ?? 0) + 200, this.active.r + 100));
     this.vCols = Math.min(MAX_COLS, Math.max(this.vCols, (used?.c1 ?? 0) + 20, this.active.c + 20));
-    this.spacer.style.width = `${HDR_W + this.cols.offset(this.vCols)}px`;
-    this.spacer.style.height = `${HDR_H + this.rows.offset(this.vRows)}px`;
+    this.spacer.style.width = `${this.hdrW + this.cols.offset(this.vCols)}px`;
+    this.syncSpacerH();
     this.renderTabs();
     this.requestDraw();
     this.opts.onState?.();
@@ -222,17 +223,54 @@ export class SheetEditor implements EngineView {
     return this.info[this.sheet]?.frozen ?? [0, 0];
   }
 
+  /** Row-header width: wide enough for the largest row number in use. */
+  private get hdrW(): number {
+    const digits = String(Math.max(this.vRows, this.active.r + 1)).length;
+    return Math.max(HDR_W_MIN, Math.ceil(12 + digits * 7.4));
+  }
+
+  /** Real content height of the virtual area. */
+  private contentH(): number {
+    return HDR_H + this.rows.offset(this.vRows);
+  }
+
+  /** The spacer is capped (browsers limit element height to ~17–33M px);
+   * beyond that, scroll positions are scaled onto the real content. */
+  private syncSpacerH() {
+    this.spacer.style.height = `${Math.min(this.contentH(), MAX_SCROLL_PX)}px`;
+  }
+
+  /** Vertical content offset of the scrolled area (unscaled). */
+  get scrollY(): number {
+    const s = this.scroll;
+    const real = this.contentH();
+    if (real <= MAX_SCROLL_PX) return s.scrollTop;
+    const maxS = MAX_SCROLL_PX - s.clientHeight;
+    return maxS > 0 ? (s.scrollTop * (real - s.clientHeight)) / maxS : 0;
+  }
+
+  set scrollY(v: number) {
+    const s = this.scroll;
+    const real = this.contentH();
+    if (real <= MAX_SCROLL_PX) {
+      s.scrollTop = v;
+      return;
+    }
+    const maxC = real - s.clientHeight;
+    s.scrollTop = maxC > 0 ? (v * (MAX_SCROLL_PX - s.clientHeight)) / maxC : 0;
+  }
+
   /** Screen x of column c (relative to the grid element). */
   colX(c: number): number {
     const fc = this.frozen[1];
-    const x = HDR_W + this.cols.offset(c);
+    const x = this.hdrW + this.cols.offset(c);
     return c < fc ? x : x - this.scroll.scrollLeft;
   }
 
   rowY(r: number): number {
     const fr = this.frozen[0];
     const y = HDR_H + this.rows.offset(r);
-    return r < fr ? y : y - this.scroll.scrollTop;
+    return r < fr ? y : y - this.scrollY;
   }
 
   /** Cell under a screen point (relative to the grid element). */
@@ -240,8 +278,8 @@ export class SheetEditor implements EngineView {
     const [fr, fc] = this.frozen;
     const fw = this.cols.offset(fc);
     const fh = this.rows.offset(fr);
-    const gx = x - HDR_W < fw ? x - HDR_W : x - HDR_W + this.scroll.scrollLeft;
-    const gy = y - HDR_H < fh ? y - HDR_H : y - HDR_H + this.scroll.scrollTop;
+    const gx = x - this.hdrW < fw ? x - this.hdrW : x - this.hdrW + this.scroll.scrollLeft;
+    const gy = y - HDR_H < fh ? y - HDR_H : y - HDR_H + this.scrollY;
     return { r: this.rows.at(Math.max(0, gy)), c: this.cols.at(Math.max(0, gx)) };
   }
 
@@ -255,13 +293,13 @@ export class SheetEditor implements EngineView {
     this.scroll.addEventListener("scroll", () => {
       // grow the virtual area as the user approaches its end
       const s = this.scroll;
-      if (s.scrollTop + s.clientHeight * 2 > HDR_H + this.rows.offset(this.vRows) && this.vRows < MAX_ROWS) {
+      if (this.scrollY + s.clientHeight * 2 > HDR_H + this.rows.offset(this.vRows) && this.vRows < MAX_ROWS) {
         this.vRows = Math.min(MAX_ROWS, this.vRows * 2);
-        this.spacer.style.height = `${HDR_H + this.rows.offset(this.vRows)}px`;
+        this.syncSpacerH();
       }
-      if (s.scrollLeft + s.clientWidth * 2 > HDR_W + this.cols.offset(this.vCols) && this.vCols < MAX_COLS) {
+      if (s.scrollLeft + s.clientWidth * 2 > this.hdrW + this.cols.offset(this.vCols) && this.vCols < MAX_COLS) {
         this.vCols = Math.min(MAX_COLS, this.vCols * 2);
-        this.spacer.style.width = `${HDR_W + this.cols.offset(this.vCols)}px`;
+        this.spacer.style.width = `${this.hdrW + this.cols.offset(this.vCols)}px`;
       }
       if (this.editing?.source === "cell") this.placeEditor();
       this.requestDraw();
@@ -269,7 +307,7 @@ export class SheetEditor implements EngineView {
     this.scroll.addEventListener("mousedown", (e) => this.onMouseDown(e));
     this.scroll.addEventListener("dblclick", (e) => {
       const p = this.point(e);
-      if (p.y > HDR_H && p.x > HDR_W) this.beginEdit(null);
+      if (p.y > HDR_H && p.x > this.hdrW) this.beginEdit(null);
     });
     window.addEventListener("mousemove", (e) => this.onMouseMove(e));
     window.addEventListener("mouseup", () => this.onMouseUp());
@@ -364,7 +402,7 @@ export class SheetEditor implements EngineView {
       this.focus();
     }
     e.preventDefault();
-    if (y < HDR_H && x < HDR_W) {
+    if (y < HDR_H && x < this.hdrW) {
       this.anchor = { r: 0, c: 0 };
       this.extent = { r: MAX_ROWS - 1, c: MAX_COLS - 1 };
       this.active = { r: 0, c: 0 };
@@ -388,7 +426,7 @@ export class SheetEditor implements EngineView {
       this.selectionChanged();
       return;
     }
-    if (x < HDR_W) {
+    if (x < this.hdrW) {
       const edge = this.edgeNear(y, "row");
       if (edge !== null) {
         this.drag = { kind: "rowResize", index: edge, start: e.clientY, size: this.rows.sizeOf(edge) };
@@ -452,7 +490,7 @@ export class SheetEditor implements EngineView {
       if (Math.abs(this.colX(c + 1) - v) <= 3) return c;
       if (c > 0 && Math.abs(this.colX(c) - v) <= 3) return c - 1;
     } else {
-      const r = this.cellAt(HDR_W + 1, v).r;
+      const r = this.cellAt(this.hdrW + 1, v).r;
       if (Math.abs(this.rowY(r + 1) - v) <= 3) return r;
       if (r > 0 && Math.abs(this.rowY(r) - v) <= 3) return r - 1;
     }
@@ -463,7 +501,7 @@ export class SheetEditor implements EngineView {
     const d = this.drag;
     if (!d || !this.wb) return;
     const { x, y } = this.point(e);
-    const cell = this.cellAt(Math.max(HDR_W + 1, x), Math.max(HDR_H + 1, y));
+    const cell = this.cellAt(Math.max(this.hdrW + 1, x), Math.max(HDR_H + 1, y));
     switch (d.kind) {
       case "select":
         this.extent = cell;
@@ -561,10 +599,10 @@ export class SheetEditor implements EngineView {
 
   private autoScroll(x: number, y: number) {
     const s = this.scroll;
-    if (y > s.clientHeight - 10) s.scrollTop += 20;
-    if (y < HDR_H + 4 && s.scrollTop > 0) s.scrollTop -= 20;
+    if (y > s.clientHeight - 10) this.scrollY += 20;
+    if (y < HDR_H + 4 && this.scrollY > 0) this.scrollY -= 20;
     if (x > s.clientWidth - 10) s.scrollLeft += 30;
-    if (x < HDR_W + 4 && s.scrollLeft > 0) s.scrollLeft -= 30;
+    if (x < this.hdrW + 4 && s.scrollLeft > 0) s.scrollLeft -= 30;
   }
 
   /** Keyboard handling while the grid (not an editor) has focus. Public for tests. */
@@ -733,23 +771,23 @@ export class SheetEditor implements EngineView {
     const [fr, fc] = this.frozen;
     if (p.r >= this.vRows - 10) {
       this.vRows = Math.min(MAX_ROWS, p.r + 200);
-      this.spacer.style.height = `${HDR_H + this.rows.offset(this.vRows)}px`;
+      this.syncSpacerH();
     }
     if (p.c >= this.vCols - 5) {
       this.vCols = Math.min(MAX_COLS, p.c + 20);
-      this.spacer.style.width = `${HDR_W + this.cols.offset(this.vCols)}px`;
+      this.spacer.style.width = `${this.hdrW + this.cols.offset(this.vCols)}px`;
     }
     if (p.r >= fr) {
       const top = this.rows.offset(p.r) - this.rows.offset(fr);
       const bottom = this.rows.offset(p.r + 1);
       const viewH = s.clientHeight - HDR_H;
-      if (top < s.scrollTop) s.scrollTop = top;
-      else if (viewH > 0 && bottom - s.scrollTop > viewH) s.scrollTop = bottom - viewH;
+      if (top < this.scrollY) this.scrollY = top;
+      else if (viewH > 0 && bottom - this.scrollY > viewH) this.scrollY = bottom - viewH;
     }
     if (p.c >= fc) {
       const left = this.cols.offset(p.c) - this.cols.offset(fc);
       const right = this.cols.offset(p.c + 1);
-      const viewW = s.clientWidth - HDR_W;
+      const viewW = s.clientWidth - this.hdrW;
       if (left < s.scrollLeft) s.scrollLeft = left;
       else if (viewW > 0 && right - s.scrollLeft > viewW) s.scrollLeft = right - viewW;
     }
@@ -1383,13 +1421,13 @@ export class SheetEditor implements EngineView {
     const [fr, fc] = this.frozen;
     const fw = this.cols.offset(fc);
     const fh = this.rows.offset(fr);
-    const [vr0, vr1] = this.visible(this.rows, fr, this.scroll.scrollTop, H - HDR_H - fh);
-    const [vc0, vc1] = this.visible(this.cols, fc, this.scroll.scrollLeft, W - HDR_W - fw);
+    const [vr0, vr1] = this.visible(this.rows, fr, this.scrollY, H - HDR_H - fh);
+    const [vc0, vc1] = this.visible(this.cols, fc, this.scroll.scrollLeft, W - this.hdrW - fw);
     const rowSets: [number, number][] = fr > 0 ? [[0, fr - 1], [vr0, vr1]] : [[vr0, vr1]];
     const colSets: [number, number][] = fc > 0 ? [[0, fc - 1], [vc0, vc1]] : [[vc0, vc1]];
     for (const [r0, r1] of rowSets) {
       for (const [c0, c1] of colSets) {
-        const clipX = c0 < fc ? HDR_W : HDR_W + fw;
+        const clipX = c0 < fc ? this.hdrW : this.hdrW + fw;
         const clipY = r0 < fr ? HDR_H : HDR_H + fh;
         const clipW = c0 < fc ? fw : W - clipX;
         const clipH = r0 < fr ? fh : H - clipY;
@@ -1407,14 +1445,14 @@ export class SheetEditor implements EngineView {
     if (this.charts.length) {
       ctx.save();
       ctx.beginPath();
-      ctx.rect(HDR_W, HDR_H, W - HDR_W, H - HDR_H);
+      ctx.rect(this.hdrW, HDR_H, W - this.hdrW, H - HDR_H);
       ctx.clip();
       this.charts.forEach(({ chart, data }, i) => {
         const x0 = this.colX(chart.anchor.c0);
         const y0 = this.rowY(chart.anchor.r0);
         const x1 = this.colX(chart.anchor.c1 + 1);
         const y1 = this.rowY(chart.anchor.r1 + 1);
-        if (x1 < HDR_W || y1 < HDR_H || x0 > W || y0 > H) return;
+        if (x1 < this.hdrW || y1 < HDR_H || x0 > W || y0 > H) return;
         drawChart(ctx, x0, y0, x1 - x0, y1 - y0, chart.kind, chart.title, data, this.selectedChart === i);
         if (this.selectedChart === i) {
           ctx.fillStyle = ACCENT.base;
@@ -1433,8 +1471,8 @@ export class SheetEditor implements EngineView {
         ctx.lineTo(W, HDR_H + fh + 0.5);
       }
       if (fc > 0) {
-        ctx.moveTo(HDR_W + fw + 0.5, 0);
-        ctx.lineTo(HDR_W + fw + 0.5, H);
+        ctx.moveTo(this.hdrW + fw + 0.5, 0);
+        ctx.lineTo(this.hdrW + fw + 0.5, H);
       }
       ctx.stroke();
     }
@@ -1592,7 +1630,7 @@ export class SheetEditor implements EngineView {
     const s = this.selection;
     ctx.fillStyle = "#f3f4f6";
     ctx.fillRect(0, 0, W, HDR_H);
-    ctx.fillRect(0, 0, HDR_W, H);
+    ctx.fillRect(0, 0, this.hdrW, H);
     ctx.font = "12px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -1602,7 +1640,7 @@ export class SheetEditor implements EngineView {
     for (const [c0, c1] of colSets) {
       ctx.save();
       ctx.beginPath();
-      ctx.rect(c0 < fc ? HDR_W : HDR_W + this.cols.offset(fc), 0, W, HDR_H);
+      ctx.rect(c0 < fc ? this.hdrW : this.hdrW + this.cols.offset(fc), 0, W, HDR_H);
       ctx.clip();
       for (let c = c0; c <= c1; c++) {
         const x = this.colX(c);
@@ -1624,7 +1662,7 @@ export class SheetEditor implements EngineView {
     for (const [r0, r1] of rowSets) {
       ctx.save();
       ctx.beginPath();
-      ctx.rect(0, r0 < fr ? HDR_H : HDR_H + this.rows.offset(fr), HDR_W, H);
+      ctx.rect(0, r0 < fr ? HDR_H : HDR_H + this.rows.offset(fr), this.hdrW, H);
       ctx.clip();
       for (let r = r0; r <= r1; r++) {
         const y = this.rowY(r);
@@ -1632,13 +1670,13 @@ export class SheetEditor implements EngineView {
         const on = r >= s.r0 && r <= s.r1;
         if (on) {
           ctx.fillStyle = ACCENT.soft;
-          ctx.fillRect(0, y, HDR_W, ht);
+          ctx.fillRect(0, y, this.hdrW, ht);
         }
         ctx.fillStyle = on ? ACCENT.strong : "#4b5563";
-        ctx.fillText(String(r + 1), HDR_W / 2, y + ht / 2);
+        ctx.fillText(String(r + 1), this.hdrW / 2, y + ht / 2);
         ctx.beginPath();
         ctx.moveTo(0, Math.round(y + ht) - 0.5);
-        ctx.lineTo(HDR_W, Math.round(y + ht) - 0.5);
+        ctx.lineTo(this.hdrW, Math.round(y + ht) - 0.5);
         ctx.stroke();
       }
       ctx.restore();
@@ -1646,8 +1684,8 @@ export class SheetEditor implements EngineView {
     ctx.beginPath();
     ctx.moveTo(0, HDR_H - 0.5);
     ctx.lineTo(W, HDR_H - 0.5);
-    ctx.moveTo(HDR_W - 0.5, 0);
-    ctx.lineTo(HDR_W - 0.5, H);
+    ctx.moveTo(this.hdrW - 0.5, 0);
+    ctx.lineTo(this.hdrW - 0.5, H);
     ctx.stroke();
   }
 }
