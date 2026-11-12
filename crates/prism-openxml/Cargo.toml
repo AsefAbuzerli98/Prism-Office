@@ -1,0 +1,16 @@
+[package]
+name = "prism-openxml"
+description = "OPC / OpenXML (ISO/IEC 29500) package reader, writer and validator for Prism Office"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+quick-xml.workspace = true
+zip.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
