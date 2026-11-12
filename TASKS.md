@@ -71,21 +71,21 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 
 ## Phase 3 — Spreadsheet Calculation Engine
 
-- [x] **P3-01** Cell store: sparse columnar storage, shared strings, styles, number formats. _(sparse ordered map + per-column formula index, not true columnar; Excel number-format codes incl. dates/fractions/sections/colours; font/fill/border/alignment styles)_
+- [x] **P3-01** Cell store: sparse columnar storage, shared strings, styles, number formats. _(sparse ordered map + per-column formula index; filled-down formulas share one parsed tree; Excel number formats; font/fill/border/alignment styles)_
 - [x] **P3-02** XLSX import/export (sheets, shared strings, styles, defined names, tables). _(lossless passthrough of unowned parts/children; shared & dynamic-array formulas, `_xlfn/_xlws/_xlpm/_xleta`, metadata.xml; verified with openpyxl + LibreOffice files)_
 - [x] **P3-03** Formula lexer/parser (A1/R1C1, structured refs, array constants, LAMBDA/LET).
 - [x] **P3-04** Dependency graph + incremental recalculation, cycle detection, multithreaded calc. _(spatial bucket index, Kahn levels, rayon on native / single-threaded in WASM)_
 - [x] **P3-05** Dynamic array evaluation & spill engine (`#SPILL!`, `#` spill-range operator).
-- [x] **P3-06** Core function library (math, stat, text, logical, date/time, lookup). _(227 functions; financial (PMT/NPV/IRR…) and engineering functions not yet)_
+- [x] **P3-06** Core function library (math, stat, text, logical, date/time, lookup). _(250 functions incl. 23 financial; engineering functions (BIN2DEC, CONVERT…) not included)_
 - [x] **P3-07** XLOOKUP / XMATCH incl. regex match mode (`match_mode = 3`).
-- [x] **P3-08** REGEXTEST / REGEXEXTRACT / REGEXREPLACE. _(Rust `regex` syntax: no look-around/back-references, unlike Excel's PCRE2)_
-- [x] **P3-09** GROUPBY / PIVOTBY / PERCENTOF / TRIMRANGE. _(TRIMRANGE function; the `A1:.A10` trim-ref operator is not parsed yet)_
-- [~] **P3-10** Virtualized grid canvas (frozen panes, merged cells, 1M+ rows smooth scroll). _(Canvas 2D; virtual area grows to 1,048,576 rows; not yet benchmarked with a million populated rows)_
+- [x] **P3-08** REGEXTEST / REGEXEXTRACT / REGEXREPLACE. _(fancy-regex: look-around, back-references, atomic groups; backtracking bounded)_
+- [x] **P3-09** GROUPBY / PIVOTBY / PERCENTOF / TRIMRANGE. _(incl. `A1:.A10` / `A1.:A10` / `A1.:.A10` trim references)_
+- [x] **P3-10** Virtualized grid canvas (frozen panes, merged cells, 1M+ rows smooth scroll). _(1,048,576 rows with scaled scrolling; 1M-row/2M-cell model: WASM load ≈4–5 s, ≈830 MB; viewport fetch <1 ms/frame; one edit + SUM(B:B) ≈90 ms in WASM, ≈37 ms native)_
 - [x] **P3-11** Cell editing, formula bar, autocomplete, fill handle, selection model.
-- [~] **P3-12** Python sandbox daemon (isolated subprocess, pandas/numpy/scipy/matplotlib). _(per-cell `python3 -I` process, CPU/memory rlimits, 30 s timeout, scrubbed env, no sockets/subprocesses, scratch-dir writes — best-effort, not an OS-level sandbox; uses whatever packages the local Python has)_
-- [~] **P3-13** `=PY(expression, return_type)` — DataFrame spill & plot image output. _(async `#BUSY!` → value/spill, `xl()` inputs, DataFrame/list spill; plot images not yet)_
-- [~] **P3-14** Charts (DrawingML chartML) and pivot tables UI. _(6 chart types rendered + written as chartML, file charts shown read-only; PivotTable dialog builds live PIVOTBY/GROUPBY — classic pivot caches not created)_
-- [~] **P3-15** Data connections (CSV, JSON, SQL via ODBC) & refresh. _(CSV/JSON/SQLite/ODBC via pyodbc, Refresh All; connection definitions are not yet saved into the .xlsx)_
+- [x] **P3-12** Python sandbox daemon (isolated subprocess, pandas/numpy/scipy/matplotlib). _(per-cell process; Linux bubblewrap (no network, read-only root, private /tmp and $HOME) → `unshare -rn` fallback; macOS sandbox-exec; Windows Job Object (memory cap, no child processes — network not blocked on Windows); uses the packages installed in the local Python)_
+- [x] **P3-13** `=PY(expression, return_type)` — DataFrame spill & plot image output. _(async `#BUSY!`, `xl()` inputs, DataFrame/list spill, matplotlib figures drawn in the cell; pictures are not written into the .xlsx)_
+- [x] **P3-14** Charts (DrawingML chartML) and pivot tables UI. _(6 chart types: insert, move, resize, retype, retitle, delete — also for charts from files; classic PivotTables saved with pivot caches (LibreOffice recognises and recomputes them identically) or live PIVOTBY formulas; pivots sharing a cache with another are passed through untouched)_
+- [x] **P3-15** Data connections (CSV, JSON, SQL via ODBC) & refresh. _(CSV/JSON/SQLite/ODBC (pyodbc), Refresh All also refreshes PivotTables; saved in xl/connections.xml, foreign connections kept)_
 
 ## Phase 4 — Presentation & Vector Engine
 
