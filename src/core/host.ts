@@ -53,9 +53,12 @@ export type ServiceInfo = { id: string; name: string } & ServiceState;
 
 export interface AiStatus {
   configured: boolean;
-  keySource: "settings" | "environment" | "none";
+  keySource: "keychain" | "file" | "environment" | "none";
   model: string;
   effort: string;
+  /** Privacy switch: false = no document content is sent anywhere. */
+  enabled: boolean;
+  provider: string;
 }
 
 export interface AiRequest {
@@ -118,7 +121,7 @@ export interface HostBridge {
   pickImage(): Promise<string | null>;
 
   aiStatus(): Promise<AiStatus>;
-  setAiConfig(cfg: { apiKey?: string; model?: string; effort?: string }): Promise<AiStatus>;
+  setAiConfig(cfg: { apiKey?: string; model?: string; effort?: string; enabled?: boolean }): Promise<AiStatus>;
   /** One Claude request; `onDelta` receives streamed text. */
   aiComplete(req: AiRequest, onDelta?: (text: string) => void): Promise<AiResponse>;
 
@@ -212,8 +215,8 @@ export class TauriHost implements HostBridge {
   aiStatus() {
     return this.api.invoke<AiStatus>("ai_status");
   }
-  setAiConfig(cfg: { apiKey?: string; model?: string; effort?: string }) {
-    return this.api.invoke<AiStatus>("set_ai_config", { apiKey: cfg.apiKey ?? null, model: cfg.model ?? null, effort: cfg.effort ?? null });
+  setAiConfig(cfg: { apiKey?: string; model?: string; effort?: string; enabled?: boolean }) {
+    return this.api.invoke<AiStatus>("set_ai_config", { apiKey: cfg.apiKey ?? null, model: cfg.model ?? null, effort: cfg.effort ?? null, enabled: cfg.enabled ?? null });
   }
   async aiComplete(req: AiRequest, onDelta?: (text: string) => void) {
     const requestId = `ai-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -390,7 +393,7 @@ export class BrowserHost implements HostBridge {
   /** Test hook / dev stub for AI calls in the browser preview. */
   aiHandler: ((req: AiRequest, onDelta?: (t: string) => void) => Promise<AiResponse>) | null = null;
   async aiStatus(): Promise<AiStatus> {
-    return { configured: !!this.aiHandler, keySource: "none", model: "claude-opus-5-5", effort: "high" };
+    return { configured: !!this.aiHandler, keySource: "none", model: "claude-opus-5-5", effort: "high", enabled: true, provider: "anthropic" };
   }
   async setAiConfig(): Promise<AiStatus> {
     return this.aiStatus();

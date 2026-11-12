@@ -23,11 +23,14 @@ export async function openAiSettings(root: HTMLElement, host: HostBridge) {
   const key = h("input", { class: "open-path", type: "password", placeholder: st.configured ? `Configured (${st.keySource}) — leave blank to keep` : "sk-ant-…", "aria-label": "Anthropic API key", autocomplete: "off" });
   const model = h("input", { class: "open-path", value: st.model, "aria-label": "Model" });
   const effort = h("select", { class: "select", "aria-label": "Effort" }, ...["low", "medium", "high", "xhigh", "max"].map((e) => h("option", { value: e, selected: e === st.effort }, e)));
-  const msg = h("p", { class: "muted small" }, st.configured ? "AI is configured. The key stays in the native host and is never sent to the page." : "Add an Anthropic API key to enable drafting, rewriting, alt text and handwriting recognition.");
+  const enabled = h("input", { type: "checkbox", checked: st.enabled, "aria-label": "Allow AI features" });
+  const where = st.keySource === "keychain" ? "in the system keychain" : st.keySource === "file" ? "in an owner-only settings file (no keychain available)" : st.keySource === "environment" ? "from ANTHROPIC_API_KEY" : "";
+  const msg = h("p", { class: "muted small" }, st.configured ? `AI is configured; the key is stored ${where} and never sent to the page.` : "Add an Anthropic API key to enable drafting, rewriting, alt text and handwriting recognition.");
   const el = overlay(
     root,
     "AI settings",
     msg,
+    h("label", { class: "radio" }, enabled, h("span", {}, "Allow AI features (when off, no document content leaves this computer)")),
     h("label", { class: "form-row" }, h("span", {}, "API key"), key),
     h("label", { class: "form-row" }, h("span", {}, "Model"), model),
     h("label", { class: "form-row" }, h("span", {}, "Effort"), effort),
@@ -38,7 +41,7 @@ export async function openAiSettings(root: HTMLElement, host: HostBridge) {
         class: "btn btn-quiet",
         onclick: async () => {
           try {
-            const s = await host.setAiConfig({ apiKey: key.value ? key.value : undefined, model: model.value, effort: effort.value });
+            const s = await host.setAiConfig({ apiKey: key.value ? key.value : undefined, model: model.value, effort: effort.value, enabled: enabled.checked });
             msg.textContent = s.configured ? "Saved." : "Saved — no key configured yet.";
             key.value = "";
           } catch (e) {

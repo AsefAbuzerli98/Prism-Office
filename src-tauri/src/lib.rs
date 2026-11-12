@@ -210,9 +210,11 @@ fn set_ai_config(
     api_key: Option<String>,
     model: Option<String>,
     effort: Option<String>,
+    enabled: Option<bool>,
     ai: State<'_, ai::AiStore>,
 ) -> Result<ai::AiStatus, String> {
-    ai.update(api_key, model, effort).map_err(|e| e.to_string())
+    ai.update(api_key, model, effort, enabled)
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Clone, Serialize)]
