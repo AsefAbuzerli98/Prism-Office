@@ -314,18 +314,25 @@ static DOC_PR_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::n
 fn image_xml(rel_id: &str, cx: u64, cy: u64, descr: &str, xml: &str) -> String {
     let rel_id = rel_id.split_once('#').map_or(rel_id, |(_, id)| id);
     if !xml.is_empty() {
-        let mut x = set_attr(xml, "docPr", "descr", descr);
-        x = set_attr(&x, "extent", "cx", &cx.to_string());
-        x = set_attr(&x, "extent", "cy", &cy.to_string());
-        if let Some(i) = x.find(":xfrm") {
-            let (head, tail) = x.split_at(i);
-            let tail = set_attr(
-                &set_attr(tail, "ext", "cx", &cx.to_string()),
-                "ext",
-                "cy",
-                &cy.to_string(),
-            );
-            x = format!("{head}{tail}");
+        // Patch only what changed so untouched pictures stay byte-identical.
+        let (_, ocx, ocy, odescr) = crate::read::image_from_run(xml).unwrap_or_default();
+        let mut x = xml.to_string();
+        if odescr != descr {
+            x = set_attr(&x, "docPr", "descr", descr);
+        }
+        if ocx != cx || ocy != cy {
+            x = set_attr(&x, "extent", "cx", &cx.to_string());
+            x = set_attr(&x, "extent", "cy", &cy.to_string());
+            if let Some(i) = x.find(":xfrm") {
+                let (head, tail) = x.split_at(i);
+                let tail = set_attr(
+                    &set_attr(tail, "ext", "cx", &cx.to_string()),
+                    "ext",
+                    "cy",
+                    &cy.to_string(),
+                );
+                x = format!("{head}{tail}");
+            }
         }
         return x;
     }
@@ -682,11 +689,12 @@ pub fn write_document_xml(
     let mut s = document_prefix(original);
     s.push_str(&blocks_xml(&doc.blocks, link_id));
     // A body must end with a paragraph before sectPr if the last block is a table.
-    if matches!(
-        doc.blocks.last(),
-        Some(Block::Table(_)) | Some(Block::Opaque { .. })
-    ) || doc.blocks.is_empty()
-    {
+    let ends_with_table = match doc.blocks.last() {
+        Some(Block::Table(_)) => true,
+        Some(Block::Opaque { xml, .. }) => xml.trim_start().starts_with("<w:tbl"),
+        _ => false,
+    };
+    if ends_with_table || doc.blocks.is_empty() {
         s.push_str("<w:p/>");
     }
     s.push_str(&sect_xml(&doc.section));

@@ -290,7 +290,7 @@ fn push_text(inlines: &mut Vec<Inline>, text: &str, marks: &Marks) {
 }
 
 /// Inline picture details from a run containing `w:drawing/wp:inline`.
-fn image_from_run(raw: &str) -> Option<(String, u64, u64, String)> {
+pub(crate) fn image_from_run(raw: &str) -> Option<(String, u64, u64, String)> {
     let mut r = Reader::from_str(raw);
     let (mut inline, mut embed, mut cx, mut cy, mut descr, mut blips) =
         (false, None, 0u64, 0u64, String::new(), 0);

@@ -112,6 +112,13 @@ pub const SECTPR: &[&str] = &[
 /// Sort key for a (possibly prefixed) element name within `table`.
 pub fn rank(table: &[&str], qname: &str) -> usize {
     let local = qname.rsplit(':').next().unwrap_or(qname);
+    // header/footer references form one choice group in CT_SectPr: any order is valid,
+    // so they share a rank and keep their original interleaving.
+    let local = if local == "footerReference" {
+        "headerReference"
+    } else {
+        local
+    };
     table
         .iter()
         .position(|n| *n == local)
