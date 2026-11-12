@@ -210,3 +210,32 @@ button { font: inherit; color: inherit; cursor: pointer; }
 [data-state="failed"] > .service-dot { background: #dc2626; }
 [data-state="unavailable"] > .service-dot { background: #d4d4d8; }
 .dialog-actions { display: flex; justify-content: flex-end; }
+
+/* ---- Word editor ----------------------------------------------------------- */
+.word-editor { position: absolute; inset: 0; display: grid; grid-template-columns: 1fr; }
+.word-editor.split { grid-template-columns: 1fr minmax(280px, 40%); }
+.word-scroll { position: relative; overflow: auto; outline: none; cursor: text; background: var(--bg); }
+.word-canvas { position: absolute; top: 0; left: 0; pointer-events: none; will-change: transform; }
+.word-spacer { pointer-events: none; }
+.word-input {
+  position: absolute; top: 0; left: 0; width: 2px; height: 20px; padding: 0; border: 0; margin: 0;
+  opacity: 0; resize: none; overflow: hidden; white-space: pre; font-size: 16px; caret-color: transparent;
+}
+.word-md {
+  border: 0; border-inline-start: 1px solid var(--border); padding: 16px 18px; resize: none; outline: none;
+  font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--surface); color: var(--text);
+}
+.ribbon-cmd[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-strong); box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* ---- Picker menus ------------------------------------------------------------ */
+.picker {
+  position: fixed; z-index: 40; min-width: 200px; max-height: 60vh; overflow: auto; padding: 4px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 16px 40px -12px rgba(0,0,0,.35);
+}
+.picker-title { padding: 6px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.picker-item {
+  display: block; width: 100%; text-align: start; padding: 6px 10px; border: 0; border-radius: 6px; background: transparent;
+}
+.picker-item:hover, .picker-item:focus-visible { background: var(--bg); outline: none; }
+.picker-item.selected { background: var(--accent-soft); color: var(--accent-strong); }

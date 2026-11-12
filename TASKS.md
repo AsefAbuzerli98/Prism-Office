@@ -51,16 +51,16 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 
 ## Phase 2 — Word Processing Engine
 
-- [ ] **P2-01** Document model (blocks/inlines/runs, styles) with immutable transactions + undo/redo.
-- [ ] **P2-02** DOCX import: `word/document.xml`, `styles.xml`, numbering, sections, headers/footers.
-- [ ] **P2-03** DOCX export with round-trip fidelity tests against a corpus.
-- [ ] **P2-04** Paragraph layout engine: line breaking (UAX #14), justification, hyphenation, bidi.
-- [ ] **P2-05** Font metrics & shaping (rustybuzz/harfbuzz), font fallback, embedded fonts.
-- [ ] **P2-06** Pagination: page setup, margins, columns, widows/orphans, keep-with-next.
-- [ ] **P2-07** Canvas renderer for pages (WebGPU with WebGL2 fallback), caret & selection.
-- [ ] **P2-08** Typography ribbon wired to commands (font, size, bold/italic, styles, lists).
-- [ ] **P2-09** Markdown ⇄ OpenXML bidirectional converter + split-pane Markdown source view.
-- [ ] **P2-10** Clipboard interop (HTML, RTF, plain text, images) on macOS/Windows.
+- [x] **P2-01** Document model (blocks/inlines/runs, styles) with immutable transactions + undo/redo.
+- [x] **P2-02** DOCX import: `word/document.xml`, `styles.xml`, numbering, sections (headers/footers preserved, not yet rendered).
+- [~] **P2-03** DOCX export with round-trip fidelity tests — synthetic fixtures + TS⇄Rust contract done; real-world corpus pending (X-04).
+- [~] **P2-04** Paragraph layout engine — greedy breaking (spaces/hyphens/CJK), alignment, justification, tabs done; full UAX #14, hyphenation, bidi pending.
+- [~] **P2-05** Font metrics via canvas `measureText` with caching; shaping (rustybuzz), fallback and embedded fonts pending.
+- [~] **P2-06** Pagination — page size/orientation, margins, page breaks, keep-with-next, orphan control done; columns and widow control pending.
+- [~] **P2-07** Canvas renderer, caret & selection, hit-testing, IME input (Canvas 2D backend); WebGPU/WebGL2 backend pending.
+- [x] **P2-08** Typography ribbon wired to commands (font, size, bold/italic, styles, lists).
+- [x] **P2-09** Markdown ⇄ OpenXML bidirectional converter + split-pane Markdown source view.
+- [~] **P2-10** Clipboard interop — HTML, plain text and native Prism fragments done; RTF and images pending.
 - [ ] **P2-11** Tables, images, footnotes/endnotes, fields (TOC, page numbers), citations.
 - [ ] **P2-12** AI Agent panel: autonomous multi-step drafting from outline/reference files.
 - [ ] **P2-13** Verifiable source citations (footnotes linked to source documents / KB).
@@ -123,6 +123,11 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 ---
 
 ## Progress log
+
+- **2026-11-12** — Phase 0 complete (git hooks, ADRs). Phase 2 started:
+  `prism-word` crate (lossless DOCX ⇄ model), canvas WYSIWYG editor with
+  undo/redo, layout & pagination, typography/page-setup ribbon, Markdown
+  split view, HTML clipboard.
 
 - **2026-11-12** — Phase 1 complete: window styling (macOS overlay/traffic
   lights, Windows Mica), per-document native windows + tab detach, shared

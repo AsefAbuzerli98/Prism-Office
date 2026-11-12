@@ -60,6 +60,7 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
             cmd("doc.bold", "Bold", "B", 2),
             cmd("doc.italic", "Italic", "I", 2),
             cmd("doc.underline", "Underline", "U", 2),
+            cmd("doc.strike", "Strikethrough", "S̶", 2),
             cmd("doc.font", "Font", "Aa", 2),
           ],
         },
@@ -85,6 +86,7 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
           commands: [
             cmd("doc.margins", "Margins", "▭", 2),
             cmd("doc.orientation", "Orientation", "⟲", 2),
+            cmd("doc.pageBreak", "Page Break", "⤓", 2),
             cmd("doc.columns", "Columns", "▥", 2),
           ],
         },

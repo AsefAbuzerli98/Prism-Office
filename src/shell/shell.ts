@@ -8,6 +8,9 @@ import { TabManager, type DocTab } from "../core/tabs";
 import { applyTheme } from "../core/theme";
 import { renderHub } from "../hub/hub";
 import { renderEngineView } from "../modes/views";
+import { WordEditor, type EngineView } from "../word/editor";
+import { IMPLEMENTED_PHASE } from "../core/ribbons";
+import { openPicker } from "./picker";
 import { CommandPalette } from "./palette";
 import { renderRibbon } from "./ribbon";
 import { openSettings } from "./settings";
@@ -22,7 +25,7 @@ export class Shell {
   readonly commands: CommandRegistry;
   private readonly palette: CommandPalette;
   private ribbonTab: Partial<Record<Mode, string>> = {};
-  private views = new Map<number, HTMLElement>();
+  private views = new Map<number, { el: HTMLElement; engine: EngineView | null }>();
   private showHub = true;
   private settings: Settings = { ...DEFAULT_SETTINGS };
   private recents: RecentFile[] = [];
@@ -47,6 +50,7 @@ export class Shell {
     this.commands = commands ?? new CommandRegistry(ctx.platform === "macos" || undefined);
     this.palette = new CommandPalette(root, this.commands);
     this.registerCommands();
+    this.registerWordCommands();
 
     root.replaceChildren(
       h("div", { class: "titlebar", "data-tauri-drag-region": true }, this.strip),
@@ -55,7 +59,10 @@ export class Shell {
       this.status,
     );
     this.tabs.on((e) => {
-      if (e.type === "closed") this.views.delete(e.tab.docId);
+      if (e.type === "closed") {
+        this.views.get(e.tab.docId)?.engine?.dispose();
+        this.views.delete(e.tab.docId);
+      }
       if (e.type === "activated") this.showHub = e.tab === null && !this.isDocumentWindow;
       this.render();
     });
@@ -143,7 +150,10 @@ export class Shell {
       path = picked;
     }
     await this.guard(async () => {
+      const engine = this.views.get(tab.docId)?.engine;
+      await engine?.flush();
       const info = await this.host.saveDocument(tab.docId, path);
+      if (engine instanceof WordEditor) engine.markClean();
       this.tabs.update(tab.docId, { title: info.title, path: info.path, dirty: false });
       this.flash(t("shell.saved", { title: info.title }));
     });
@@ -220,6 +230,119 @@ export class Shell {
       })),
     );
   }
+
+  /** The active tab's engine view, if it is a word editor. */
+  get activeEditor(): WordEditor | null {
+    const tab = this.showHub ? null : this.tabs.active;
+    const e = tab ? this.views.get(tab.docId)?.engine : null;
+    return e instanceof WordEditor ? e : null;
+  }
+
+  private registerWordCommands() {
+    const ed = () => this.activeEditor;
+    const when = () => ed()?.doc != null;
+    const simple = (id: string, cmd: string, arg?: string) => ({
+      id,
+      title: () => t(`ribbon.cmd.${id}`, {}, id),
+      when,
+      hidden: true,
+      run: () => void ed()?.execute(cmd, arg),
+    });
+    this.commands.register(
+      simple("doc.bold", "bold"),
+      simple("doc.italic", "italic"),
+      simple("doc.underline", "underline"),
+      simple("doc.strike", "strike"),
+      simple("doc.align", "alignCycle"),
+      simple("doc.bullets", "bullets"),
+      simple("doc.numbering", "numbering"),
+      simple("doc.pageBreak", "pageBreak"),
+      { ...simple("doc.markdown", "markdown"), hidden: false, keys: ["Mod+Shift+M"] },
+      { ...simple("doc.orientation", "orientation") },
+    );
+  }
+
+  /** Ribbon commands that need an anchored picker. */
+  private pickerCommand(id: string, anchor: HTMLElement): boolean {
+    const ed = this.activeEditor;
+    if (!ed?.doc) return false;
+    const st = ed.state();
+    switch (id) {
+      case "doc.styles": {
+        const styles = ed.doc.styles.filter((s) => s.kind === "paragraph");
+        openPicker(
+          anchor,
+          styles.map((s) => ({
+            value: s.id,
+            label: s.name.replace(/^heading (\d)$/, "Heading $1"),
+            selected: s.id === st.style,
+            style: `font-weight:${s.run.bold ? 700 : 400};font-style:${s.run.italic ? "italic" : "normal"};font-size:${Math.min(20, Math.max(12, (s.run.size ?? 22) / 2.2))}px`,
+          })),
+          (v) => ed.execute("style", v),
+          t("word.styles"),
+        );
+        return true;
+      }
+      case "doc.font": {
+        const fonts = ["Calibri", "Arial", "Times New Roman", "Georgia", "Verdana", "Consolas", "Courier New", "Segoe UI", "Helvetica"];
+        const sizes = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48, 72];
+        openPicker(
+          anchor,
+          [
+            ...fonts.map((f) => ({ value: `font:${f}`, label: f, style: `font-family:'${f}'`, selected: f === st.font })),
+            ...sizes.map((z) => ({ value: `size:${z}`, label: `${z} pt`, selected: z === st.size })),
+          ],
+          (v) => {
+            const [k, val] = v.split(":") as [string, string];
+            ed.execute(k, val);
+          },
+          `${t("word.font")} / ${t("word.size")}`,
+        );
+        return true;
+      }
+      case "doc.margins":
+        openPicker(
+          anchor,
+          ["normal", "narrow", "moderate", "wide"].map((m) => ({ value: m, label: t(`word.margins.${m}`) })),
+          (v) => ed.execute("margins", v),
+          t("word.margins"),
+        );
+        return true;
+      case "doc.orientation":
+        openPicker(
+          anchor,
+          [
+            { value: "portrait", label: t("word.portrait"), selected: !ed.doc.section.landscape },
+            { value: "landscape", label: t("word.landscape"), selected: ed.doc.section.landscape },
+          ],
+          (v) => ed.execute("orientation", v),
+        );
+        return true;
+    }
+    return false;
+  }
+
+  private ribbonEnabled = (id: string, phase: number) => {
+    if (this.commands.has(id)) return this.commands.isEnabled(id);
+    if (["doc.styles", "doc.font", "doc.margins", "doc.orientation"].includes(id)) return this.activeEditor?.doc != null;
+    return phase <= IMPLEMENTED_PHASE;
+  };
+
+  private ribbonActive = (id: string) => {
+    const ed = this.activeEditor;
+    if (!ed?.doc) return false;
+    const st = ed.state();
+    switch (id) {
+      case "doc.bold": return st.bold;
+      case "doc.italic": return st.italic;
+      case "doc.underline": return st.underline;
+      case "doc.strike": return st.strike;
+      case "doc.bullets": return st.list === 9001;
+      case "doc.numbering": return st.list === 9002;
+      case "doc.markdown": return ed.markdownVisible;
+      default: return false;
+    }
+  };
 
   private cycle(dir: 1 | -1) {
     this.tabs.cycle(dir);
@@ -368,7 +491,11 @@ export class Shell {
           this.ribbonTab[mode] = id;
           this.render();
         },
-        (id) => void this.commands.execute(id),
+        (id, anchor) => {
+          if (!this.pickerCommand(id, anchor)) void this.commands.execute(id);
+        },
+        this.ribbonEnabled,
+        this.ribbonActive,
       ),
     );
   }
@@ -392,10 +519,29 @@ export class Shell {
     }
     let view = this.views.get(active.docId);
     if (!view) {
-      view = renderEngineView(active.mode);
+      if (active.mode === "document") {
+        const docId = active.docId;
+        const engine = new WordEditor(this.host, docId, {
+          onDirty: () => this.tabs.update(docId, { dirty: true }),
+          onState: () => {
+            if (this.tabs.active?.docId === docId && !this.showHub) this.renderRibbon(this.tabs.active);
+          },
+        });
+        engine.ready.then(
+          () => engine.focus(),
+          (err) => this.flash(String(err instanceof Error ? err.message : err), true),
+        );
+        view = { el: engine.el, engine };
+      } else {
+        view = { el: renderEngineView(active.mode), engine: null };
+      }
       this.views.set(active.docId, view);
     }
-    this.workspace.replaceChildren(view);
+    const attached = this.workspace.firstChild === view.el;
+    if (!attached) {
+      this.workspace.replaceChildren(view.el);
+      view.engine?.focus();
+    }
   }
 
   private renderStatus(active: DocTab | null) {

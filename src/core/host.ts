@@ -1,3 +1,4 @@
+import { blankDocument, type WordDocument } from "../word/model";
 import type { Mode } from "./modes";
 import { MODES, modeFromPath } from "./modes";
 
@@ -82,6 +83,10 @@ export interface HostBridge {
   saveDocument(id: number, path?: string): Promise<DocumentInfo>;
   closeDocument(id: number): Promise<void>;
 
+  /** Word-processing model of a document (Document mode). */
+  getWordDocument(id: number): Promise<WordDocument>;
+  updateWordDocument(id: number, content: WordDocument): Promise<void>;
+
   openDocumentWindow(id: number): Promise<void>;
   closeCurrentWindow(): Promise<void>;
   takePendingOpens(): Promise<string[]>;
@@ -153,6 +158,12 @@ export class TauriHost implements HostBridge {
   }
   closeDocument(id: number) {
     return this.api.invoke<void>("close_document", { id });
+  }
+  getWordDocument(id: number) {
+    return this.api.invoke<WordDocument>("get_word_document", { id });
+  }
+  updateWordDocument(id: number, content: WordDocument) {
+    return this.api.invoke<void>("update_word_document", { id, content });
   }
   openDocumentWindow(id: number) {
     return this.api.invoke<void>("open_document_window", { id });
@@ -269,6 +280,25 @@ export class BrowserHost implements HostBridge {
   async closeDocument(id: number): Promise<void> {
     if (!this.docs.delete(id)) throw new Error(`no open document with id ${id}`);
     this.emit({ type: "documentClosed", id });
+  }
+
+  private words = new Map<number, WordDocument>();
+
+  async getWordDocument(id: number): Promise<WordDocument> {
+    const doc = this.docs.get(id);
+    if (!doc) throw new Error(`no open document with id ${id}`);
+    if (doc.kind !== "document") throw new Error(`document ${id} is not a word-processing document`);
+    let w = this.words.get(id);
+    if (!w) {
+      w = blankDocument();
+      this.words.set(id, w);
+    }
+    return structuredClone(w);
+  }
+
+  async updateWordDocument(id: number, content: WordDocument): Promise<void> {
+    if (!this.docs.has(id)) throw new Error(`no open document with id ${id}`);
+    this.words.set(id, structuredClone(content));
   }
 
   async openDocumentWindow(_id: number): Promise<void> {

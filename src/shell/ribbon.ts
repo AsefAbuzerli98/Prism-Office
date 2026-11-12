@@ -7,7 +7,9 @@ export function renderRibbon(
   mode: Mode,
   activeTabId: string,
   onTab: (id: string) => void,
-  onCommand: (id: string) => void,
+  onCommand: (id: string, anchor: HTMLElement) => void,
+  isEnabled: (id: string, phase: number) => boolean = (_id, phase) => phase <= IMPLEMENTED_PHASE,
+  isActive: (id: string) => boolean = () => false,
 ): HTMLElement {
   const tabs = RIBBONS[mode];
   const active = tabs.find((x) => x.id === activeTabId) ?? tabs[1] ?? tabs[0]!;
@@ -47,10 +49,11 @@ export function renderRibbon(
                 "button",
                 {
                   class: "ribbon-cmd",
-                  disabled: c.phase > IMPLEMENTED_PHASE,
-                  title: c.phase > IMPLEMENTED_PHASE ? t("shell.phase", { label, phase: c.phase }) : label,
+                  disabled: !isEnabled(c.id, c.phase),
+                  "aria-pressed": isActive(c.id) ? "true" : undefined,
+                  title: isEnabled(c.id, c.phase) || c.phase <= IMPLEMENTED_PHASE ? label : t("shell.phase", { label, phase: c.phase }),
                   dataset: { cmd: c.id },
-                  onclick: () => onCommand(c.id),
+                  onclick: (e: Event) => onCommand(c.id, e.currentTarget as HTMLElement),
                 },
                 h("span", { class: "cmd-icon" }, c.icon),
                 h("span", { class: "cmd-label" }, label),
