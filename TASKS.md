@@ -71,21 +71,21 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 
 ## Phase 3 — Spreadsheet Calculation Engine
 
-- [ ] **P3-01** Cell store: sparse columnar storage, shared strings, styles, number formats.
-- [ ] **P3-02** XLSX import/export (sheets, shared strings, styles, defined names, tables).
-- [ ] **P3-03** Formula lexer/parser (A1/R1C1, structured refs, array constants, LAMBDA/LET).
-- [ ] **P3-04** Dependency graph + incremental recalculation, cycle detection, multithreaded calc.
-- [ ] **P3-05** Dynamic array evaluation & spill engine (`#SPILL!`, `#` spill-range operator).
-- [ ] **P3-06** Core function library (math, stat, text, logical, date/time, lookup).
-- [ ] **P3-07** XLOOKUP / XMATCH incl. regex match mode (`match_mode = 3`).
-- [ ] **P3-08** REGEXTEST / REGEXEXTRACT / REGEXREPLACE.
-- [ ] **P3-09** GROUPBY / PIVOTBY / PERCENTOF / TRIMRANGE.
-- [ ] **P3-10** Virtualized grid canvas (frozen panes, merged cells, 1M+ rows smooth scroll).
-- [ ] **P3-11** Cell editing, formula bar, autocomplete, fill handle, selection model.
-- [ ] **P3-12** Python sandbox daemon (isolated subprocess, pandas/numpy/scipy/matplotlib).
-- [ ] **P3-13** `=PY(expression, return_type)` — DataFrame spill & plot image output.
-- [ ] **P3-14** Charts (DrawingML chartML) and pivot tables UI.
-- [ ] **P3-15** Data connections (CSV, JSON, SQL via ODBC) & refresh.
+- [x] **P3-01** Cell store: sparse columnar storage, shared strings, styles, number formats. _(sparse ordered map + per-column formula index, not true columnar; Excel number-format codes incl. dates/fractions/sections/colours; font/fill/border/alignment styles)_
+- [x] **P3-02** XLSX import/export (sheets, shared strings, styles, defined names, tables). _(lossless passthrough of unowned parts/children; shared & dynamic-array formulas, `_xlfn/_xlws/_xlpm/_xleta`, metadata.xml; verified with openpyxl + LibreOffice files)_
+- [x] **P3-03** Formula lexer/parser (A1/R1C1, structured refs, array constants, LAMBDA/LET).
+- [x] **P3-04** Dependency graph + incremental recalculation, cycle detection, multithreaded calc. _(spatial bucket index, Kahn levels, rayon on native / single-threaded in WASM)_
+- [x] **P3-05** Dynamic array evaluation & spill engine (`#SPILL!`, `#` spill-range operator).
+- [x] **P3-06** Core function library (math, stat, text, logical, date/time, lookup). _(227 functions; financial (PMT/NPV/IRR…) and engineering functions not yet)_
+- [x] **P3-07** XLOOKUP / XMATCH incl. regex match mode (`match_mode = 3`).
+- [x] **P3-08** REGEXTEST / REGEXEXTRACT / REGEXREPLACE. _(Rust `regex` syntax: no look-around/back-references, unlike Excel's PCRE2)_
+- [x] **P3-09** GROUPBY / PIVOTBY / PERCENTOF / TRIMRANGE. _(TRIMRANGE function; the `A1:.A10` trim-ref operator is not parsed yet)_
+- [~] **P3-10** Virtualized grid canvas (frozen panes, merged cells, 1M+ rows smooth scroll). _(Canvas 2D; virtual area grows to 1,048,576 rows; not yet benchmarked with a million populated rows)_
+- [x] **P3-11** Cell editing, formula bar, autocomplete, fill handle, selection model.
+- [~] **P3-12** Python sandbox daemon (isolated subprocess, pandas/numpy/scipy/matplotlib). _(per-cell `python3 -I` process, CPU/memory rlimits, 30 s timeout, scrubbed env, no sockets/subprocesses, scratch-dir writes — best-effort, not an OS-level sandbox; uses whatever packages the local Python has)_
+- [~] **P3-13** `=PY(expression, return_type)` — DataFrame spill & plot image output. _(async `#BUSY!` → value/spill, `xl()` inputs, DataFrame/list spill; plot images not yet)_
+- [~] **P3-14** Charts (DrawingML chartML) and pivot tables UI. _(6 chart types rendered + written as chartML, file charts shown read-only; PivotTable dialog builds live PIVOTBY/GROUPBY — classic pivot caches not created)_
+- [~] **P3-15** Data connections (CSV, JSON, SQL via ODBC) & refresh. _(CSV/JSON/SQLite/ODBC via pyodbc, Refresh All; connection definitions are not yet saved into the .xlsx)_
 
 ## Phase 4 — Presentation & Vector Engine
 
