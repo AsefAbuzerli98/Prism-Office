@@ -317,6 +317,7 @@ fn charts_are_written_and_read_back() {
         data: rect(0, 2, 4, 2),
         anchor: rect(9, 7, 22, 13),
         from_file: false,
+        part: None,
     });
     m.sheets[1].charts.push(prism_sheet::model::ChartDef {
         kind: "pie".into(),
@@ -324,6 +325,7 @@ fn charts_are_written_and_read_back() {
         data: rect(0, 0, 0, 1),
         anchor: rect(2, 0, 12, 5),
         from_file: false,
+        part: None,
     });
     let out = write_xlsx(&m, Some(&src), NOW).unwrap();
     std::fs::write(std::env::temp_dir().join("prism-sheet-charts.xlsx"), &out).unwrap();
@@ -356,4 +358,156 @@ fn charts_are_written_and_read_back() {
     let out2 = write_xlsx(&m2, Some(&read_xlsx(&out).unwrap().1), NOW).unwrap();
     let (m3, _) = read_xlsx(&out2).unwrap();
     assert_eq!(m3.sheets[0].charts.len(), 1);
+}
+
+#[test]
+fn classic_pivot_tables_round_trip() {
+    use prism_sheet::api::Engine;
+    use prism_sheet::model::PivotDef;
+    let (m, src) = read_xlsx(&fixture("openpyxl.xlsx")).unwrap();
+    let mut e = Engine::new(&m, NOW);
+    let src_rect = prism_sheet::Rect {
+        r0: 0,
+        c0: 0,
+        r1: 4,
+        c1: 5,
+    };
+    let def = PivotDef {
+        name: String::new(),
+        source_sheet: "Sales".into(),
+        source: src_rect,
+        rows: 0,
+        cols: Some(1),
+        values: 2,
+        function: "sum".into(),
+        location: prism_sheet::CellRef::new(12, 0),
+        extent: None,
+        part: None,
+        cache_part: None,
+    };
+    e.add_pivot(0, def.clone(), NOW).unwrap();
+    // Sum of Units by Region × Product
+    assert_eq!(e.wb.get(0, "A13"), Value::text("Sum of Units"));
+    assert_eq!(e.wb.get(0, "B14"), Value::text("Apple"));
+    assert_eq!(e.wb.get(0, "A15"), Value::text("East"));
+    assert_eq!(e.wb.get(0, "B15"), Value::Number(10.0));
+    assert_eq!(e.wb.get(0, "C15"), Value::Number(30.0));
+    assert_eq!(e.wb.get(0, "D18"), Value::Number(100.0));
+    // overlapping data is refused
+    let clash = PivotDef {
+        location: prism_sheet::CellRef::new(0, 0),
+        ..def.clone()
+    };
+    assert!(e.add_pivot(0, clash, NOW).is_err());
+    // refresh picks up source edits
+    e.edit(
+        &[prism_sheet::api::Edit {
+            sheet: 0,
+            r: 1,
+            c: 2,
+            text: "11".into(),
+        }],
+        NOW,
+    );
+    e.refresh_pivots(NOW).unwrap();
+    assert_eq!(e.wb.get(0, "B15"), Value::Number(11.0));
+    let out = write_xlsx(&e.model(), Some(&src), NOW).unwrap();
+    std::fs::write(std::env::temp_dir().join("prism-sheet-pivot.xlsx"), &out).unwrap();
+    let pkg = Package::from_bytes(&out).unwrap();
+    let wbx = String::from_utf8(
+        pkg.part(&PartName::new("/xl/workbook.xml").unwrap())
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        wbx.contains("<pivotCaches><pivotCache cacheId=\"1\""),
+        "{wbx}"
+    );
+    let pt = String::from_utf8(
+        pkg.part(&PartName::new("/xl/pivotTables/pivotTable1.xml").unwrap())
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        pt.contains(
+            r#"<location ref="A13:D18" firstHeaderRow="1" firstDataRow="2" firstDataCol="1"/>"#
+        ),
+        "{pt}"
+    );
+    assert!(pt.contains(r#"<dataField name="Sum of Units" fld="2" baseField="0" baseItem="0"/>"#));
+    // re-read: the pivot is modelled again and can be refreshed / removed
+    let (m2, src2) = read_xlsx(&out).unwrap();
+    let p = &m2.sheets[0].pivots[0];
+    assert_eq!(
+        (p.rows, p.cols, p.values, p.function.as_str()),
+        (0, Some(1), 2, "sum")
+    );
+    assert!(p.part.is_some());
+    let mut e2 = Engine::new(&m2, NOW);
+    e2.remove_pivot(0, 0, NOW);
+    assert_eq!(e2.wb.get(0, "B15"), Value::Empty);
+    let out2 = write_xlsx(&e2.model(), Some(&src2), NOW).unwrap();
+    let pkg2 = Package::from_bytes(&out2).unwrap();
+    assert!(!pkg2
+        .part_names()
+        .any(|p| p.as_str().starts_with("/xl/pivotTables/")));
+}
+
+#[test]
+fn file_charts_can_be_edited_and_deleted() {
+    let out = {
+        let (mut m, src) = read_xlsx(&fixture("openpyxl.xlsx")).unwrap();
+        let rect = |r0, c0, r1, c1| prism_sheet::Rect { r0, c0, r1, c1 };
+        for (k, a) in [
+            ("column", rect(9, 7, 22, 13)),
+            ("line", rect(24, 7, 36, 13)),
+        ] {
+            m.sheets[0].charts.push(prism_sheet::model::ChartDef {
+                kind: k.into(),
+                title: k.into(),
+                data: rect(0, 2, 4, 2),
+                anchor: a,
+                from_file: false,
+                part: None,
+            });
+        }
+        write_xlsx(&m, Some(&src), NOW).unwrap()
+    };
+    let (mut m, src) = read_xlsx(&out).unwrap();
+    assert_eq!(m.sheets[0].charts.len(), 2);
+    // edit the first (type, title, position), delete the second
+    let c = &mut m.sheets[0].charts[0];
+    c.from_file = false;
+    c.kind = "bar".into();
+    c.title = "Edited".into();
+    c.anchor = prism_sheet::Rect {
+        r0: 40,
+        c0: 1,
+        r1: 50,
+        c1: 6,
+    };
+    m.sheets[0].charts.remove(1);
+    let out2 = write_xlsx(&m, Some(&src), NOW).unwrap();
+    let (m2, _) = read_xlsx(&out2).unwrap();
+    assert_eq!(m2.sheets[0].charts.len(), 1);
+    let c = &m2.sheets[0].charts[0];
+    assert_eq!((c.kind.as_str(), c.title.as_str()), ("bar", "Edited"));
+    assert_eq!(
+        c.anchor,
+        prism_sheet::Rect {
+            r0: 40,
+            c0: 1,
+            r1: 50,
+            c1: 6
+        }
+    );
+    let pkg = Package::from_bytes(&out2).unwrap();
+    assert_eq!(
+        pkg.part_names()
+            .filter(|p| p.as_str().starts_with("/xl/charts/chart") && !p.as_str().contains("_rels"))
+            .count(),
+        1
+    );
 }

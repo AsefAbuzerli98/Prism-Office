@@ -4,7 +4,7 @@
  * this file only converts JSON.
  */
 import init, { initSync, SheetEngine } from "./wasm/prism_sheet.js";
-import type { CellStyle, ChartDef, Rect, WorkbookModel } from "./model";
+import type { CellStyle, ChartDef, PivotDef, Rect, WorkbookModel } from "./model";
 
 export interface ViewCell {
   r: number;
@@ -173,6 +173,22 @@ export class Workbook {
 
   removeChart(sheet: number, index: number): void {
     this.e.removeChart(sheet, index);
+  }
+
+  addPivot(sheet: number, def: PivotDef): Change {
+    return JSON.parse(this.e.addPivot(sheet, JSON.stringify(def), nowSerial())) as Change;
+  }
+
+  refreshPivots(): Change {
+    return JSON.parse(this.e.refreshPivots(nowSerial())) as Change;
+  }
+
+  removePivot(sheet: number, index: number): Change {
+    return JSON.parse(this.e.removePivot(sheet, index, nowSerial())) as Change;
+  }
+
+  pivots(sheet: number): PivotDef[] {
+    return JSON.parse(this.e.pivots(sheet)) as PivotDef[];
   }
 
   asyncRequests(): AsyncRequest[] {

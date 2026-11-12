@@ -223,3 +223,25 @@ describe("charts, pivots and data import", () => {
     expect(ed.wb!.charts(sheet)).toEqual([]);
   });
 });
+
+describe("classic PivotTables", () => {
+  it("adds, refreshes and edits charts in place", async () => {
+    const { ed } = editor();
+    await ed.ready;
+    ed.importRows("data", [["Region", "Sales"], ["East", "10"], ["West", "20"], ["East", "5"]]);
+    const s = ed.sheet;
+    expect(ed.addPivot(s, { name: "", sourceSheet: "data", source: { r0: 0, c0: 0, r1: 3, c1: 1 }, rows: 0, values: 1, function: "sum", location: { row: 0, col: 3 } })).toBeNull();
+    expect(shown(ed, 1, 3)).toBe("East");
+    expect(shown(ed, 1, 4)).toBe("15");
+    expect(shown(ed, 3, 4)).toBe("35");
+    ed.wb!.set(s, 1, 1, "100");
+    ed.execute("refreshPivots");
+    expect(shown(ed, 1, 4)).toBe("105");
+    // a pivot may not overwrite data
+    expect(ed.addPivot(s, { name: "", sourceSheet: "data", source: { r0: 0, c0: 0, r1: 3, c1: 1 }, rows: 0, values: 1, function: "sum", location: { row: 0, col: 0 } })).toMatch(/already data/);
+    ed.selectCell(0, 0);
+    ed.insertChart("column");
+    ed.execute("chart", "pie"); // a selected chart changes type
+    expect(ed.wb!.charts(s)[0]!.chart.kind).toBe("pie");
+  });
+});

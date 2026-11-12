@@ -147,6 +147,10 @@ struct SourceSheet {
     frozen: (u32, u32),
     col_widths: Vec<(u32, f64)>,
     merges: Vec<Rect>,
+    /// Pivot table parts that were imported into the model.
+    pivots: Vec<String>,
+    /// Chart parts of charts shown from the file.
+    charts: Vec<String>,
 }
 
 /// The original package of an imported workbook, needed for lossless save.
@@ -1090,12 +1094,15 @@ pub fn read_package(pkg: Package) -> Result<(WorkbookModel, XlsxSource)> {
             }
         }
         sm.charts = read_charts(&pkg, &part, &sm.name);
+        sm.pivots = read_pivots(&pkg, &part);
         src_sheets.push(SourceSheet {
             part,
             raw,
             frozen: sm.frozen,
             col_widths: sm.col_widths.clone(),
             merges: sm.merges.clone(),
+            pivots: vec![],
+            charts: sm.charts.iter().filter_map(|c| c.part.clone()).collect(),
         });
         model.sheets.push(sm);
     }
@@ -1136,6 +1143,20 @@ pub fn read_package(pkg: Package) -> Result<(WorkbookModel, XlsxSource)> {
                 _ => {}
             }
         }
+    }
+    // pivots sharing a cache with another pivot stay unmodelled (passthrough)
+    let mut cache_use: HashMap<String, usize> = HashMap::new();
+    for sm in &model.sheets {
+        for p in &sm.pivots {
+            *cache_use
+                .entry(p.cache_part.clone().unwrap_or_default())
+                .or_default() += 1;
+        }
+    }
+    for (sm, ss) in model.sheets.iter_mut().zip(src_sheets.iter_mut()) {
+        sm.pivots
+            .retain(|p| cache_use.get(p.cache_part.as_deref().unwrap_or_default()) == Some(&1));
+        ss.pivots = sm.pivots.iter().filter_map(|p| p.part.clone()).collect();
     }
     if model.sheets.is_empty() {
         return Err(bad("workbook", "no worksheets"));
@@ -1527,6 +1548,18 @@ pub fn write_package(
         }
         pkg.remove_part(&p);
     }
+    let mut next_cache_id = wb_raw
+        .get("pivotCaches")
+        .map(|x| {
+            re!(r#"cacheId="(\d+)""#)
+                .captures_iter(x)
+                .filter_map(|c| c[1].parse::<u32>().ok())
+                .max()
+                .unwrap_or(0)
+                + 1
+        })
+        .unwrap_or(1);
+    let mut new_caches: Vec<(u32, String)> = Vec::new();
     for (si, sm) in model.sheets.iter().enumerate() {
         let src_sheet = sm.source.and_then(|i| source.and_then(|s| s.sheets.get(i)));
         let part = match src_sheet {
@@ -1576,9 +1609,83 @@ pub fn write_package(
         {
             set("sheetViews", Some(views_xml(sh.frozen, si == 0)));
         }
+        // file charts that were edited or deleted in the editor
+        let file_parts: Vec<String> = src_sheet.map(|s| s.charts.clone()).unwrap_or_default();
+        let edited: Vec<&crate::model::ChartDef> = sh
+            .charts
+            .iter()
+            .filter(|c| !c.from_file && c.part.as_ref().is_some_and(|p| file_parts.contains(p)))
+            .collect();
+        let deleted: Vec<&String> = file_parts
+            .iter()
+            .filter(|p| !sh.charts.iter().any(|c| c.part.as_ref() == Some(*p)))
+            .collect();
+        if !edited.is_empty() || !deleted.is_empty() {
+            let srels = pkg.relationships(Some(&part)).unwrap_or_default();
+            for dr in srels.of_type(REL_DRAWING) {
+                let Ok(dp) = part.resolve(&dr.target) else {
+                    continue;
+                };
+                let mut dxml = part_text(&pkg, &dp)?;
+                let mut drels = pkg.relationships(Some(&dp)).unwrap_or_default();
+                let block_of = |dxml: &str, rid: &str| {
+                    re!(r"(?s)<(\w+:)?twoCellAnchor\b.*?</(\w+:)?twoCellAnchor>")
+                        .find_iter(dxml)
+                        .find(|m| m.as_str().contains(&format!(r#"r:id="{rid}""#)))
+                        .map(|m| (m.start(), m.end(), m.as_str().to_string()))
+                };
+                for c in &edited {
+                    let Ok(cp) = PartName::new(c.part.as_deref().unwrap_or_default()) else {
+                        continue;
+                    };
+                    let Some(rid) = rel_id_for(&drels, &dp, &cp) else {
+                        continue;
+                    };
+                    let data = crate::chart::chart_data(&wb, si, c);
+                    pkg.set_part(
+                        cp.clone(),
+                        crate::chart::chart_xml(c, &data, &sm.name).into_bytes(),
+                        Some(CT_CHART),
+                    );
+                    if let Some((a, b, block)) = block_of(&dxml, &rid) {
+                        let pos = |tag: &str, col: u32, row: u32, block: &str| {
+                            re!(r"(?s)<(\w+:)?(from|to)>.*?</(\w+:)?(from|to)>")
+                                .replace_all(block, |m: &regex::Captures| {
+                                    if &m[2] != tag {
+                                        return m[0].to_string();
+                                    }
+                                    let p = m.get(1).map_or("", |x| x.as_str());
+                                    format!("<{p}{tag}><{p}col>{col}</{p}col><{p}colOff>0</{p}colOff><{p}row>{row}</{p}row><{p}rowOff>0</{p}rowOff></{p}{tag}>")
+                                })
+                                .into_owned()
+                        };
+                        let nb = pos("from", c.anchor.c0, c.anchor.r0, &block);
+                        let nb = pos("to", c.anchor.c1 + 1, c.anchor.r1 + 1, &nb);
+                        dxml.replace_range(a..b, &nb);
+                    }
+                }
+                for p in &deleted {
+                    let Ok(cp) = PartName::new(p) else { continue };
+                    let Some(rid) = rel_id_for(&drels, &dp, &cp) else {
+                        continue;
+                    };
+                    if let Some((a, b, _)) = block_of(&dxml, &rid) {
+                        dxml.replace_range(a..b, "");
+                    }
+                    drels.remove(&rid);
+                    pkg.remove_part(&cp);
+                    pkg.remove_part(&cp.rels_part());
+                }
+                pkg.set_part(dp.clone(), dxml.into_bytes(), None);
+                pkg.set_relationships(Some(&dp), &drels);
+            }
+        }
         // charts created in the editor
-        let new_charts: Vec<&crate::model::ChartDef> =
-            sh.charts.iter().filter(|c| !c.from_file).collect();
+        let new_charts: Vec<&crate::model::ChartDef> = sh
+            .charts
+            .iter()
+            .filter(|c| !c.from_file && !c.part.as_ref().is_some_and(|p| file_parts.contains(p)))
+            .collect();
         if !new_charts.is_empty() {
             let mut srels = pkg.relationships(Some(&part)).unwrap_or_default();
             let existing = children
@@ -1659,6 +1766,92 @@ pub fn write_package(
             pkg.set_part(drawing.clone(), dxml.into_bytes(), None);
             pkg.set_relationships(Some(&drawing), &drels);
         }
+        // classic PivotTables
+        {
+            let mut srels = pkg.relationships(Some(&part)).unwrap_or_default();
+            if let Some(ss) = src_sheet {
+                for pp in &ss.pivots {
+                    if !sh
+                        .pivots
+                        .iter()
+                        .any(|p| p.part.as_deref() == Some(pp.as_str()))
+                    {
+                        if let Ok(pn) = PartName::new(pp) {
+                            if let Some(id) = rel_id_for(&srels, &part, &pn) {
+                                srels.remove(&id);
+                            }
+                            pkg.remove_part(&pn);
+                            pkg.remove_part(&pn.rels_part());
+                        }
+                    }
+                }
+            }
+            for p in &sh.pivots {
+                let Ok(t) = crate::pivot::compute(&wb, p) else {
+                    continue;
+                };
+                let existing = p
+                    .part
+                    .as_deref()
+                    .zip(p.cache_part.as_deref())
+                    .and_then(|(a, b)| Some((PartName::new(a).ok()?, PartName::new(b).ok()?)))
+                    .filter(|(a, _)| pkg.has_part(a));
+                match existing {
+                    Some((tp, cp)) => {
+                        let old = part_text(&pkg, &tp)?;
+                        let cache_id = re!(r#"cacheId="(\d+)""#)
+                            .captures(&old)
+                            .and_then(|c| c[1].parse().ok())
+                            .unwrap_or(1);
+                        pkg.set_part(
+                            cp,
+                            crate::pivot::cache_definition_xml(p, &t, &wb).into_bytes(),
+                            Some(CT_PIVOT_CACHE),
+                        );
+                        pkg.set_part(
+                            tp,
+                            crate::pivot::table_definition_xml(p, &t, cache_id).into_bytes(),
+                            Some(CT_PIVOT_TABLE),
+                        );
+                    }
+                    None => {
+                        let cp = free_part(&pkg, "/xl/pivotCache/pivotCacheDefinition", ".xml");
+                        pkg.set_part(
+                            cp.clone(),
+                            crate::pivot::cache_definition_xml(p, &t, &wb).into_bytes(),
+                            Some(CT_PIVOT_CACHE),
+                        );
+                        let cache_id = next_cache_id;
+                        next_cache_id += 1;
+                        let rid = rels.add(
+                            REL_PIVOT_CACHE,
+                            &relative_any(&wb_part, &cp),
+                            TargetMode::Internal,
+                        );
+                        new_caches.push((cache_id, rid));
+                        let tp = free_part(&pkg, "/xl/pivotTables/pivotTable", ".xml");
+                        pkg.set_part(
+                            tp.clone(),
+                            crate::pivot::table_definition_xml(p, &t, cache_id).into_bytes(),
+                            Some(CT_PIVOT_TABLE),
+                        );
+                        let mut trels = Relationships::default();
+                        trels.add(
+                            REL_PIVOT_CACHE,
+                            &relative_any(&tp, &cp),
+                            TargetMode::Internal,
+                        );
+                        pkg.set_relationships(Some(&tp), &trels);
+                        srels.add(
+                            REL_PIVOT_TABLE,
+                            &relative_any(&part, &tp),
+                            TargetMode::Internal,
+                        );
+                    }
+                }
+            }
+            pkg.set_relationships(Some(&part), &srels);
+        }
         children.sort_by_key(|(n, _)| order_index(SHEET_ORDER, n));
         let head = src_sheet.map(|s| s.raw.head_open()).unwrap_or_else(|| {
             format!(
@@ -1738,6 +1931,22 @@ pub fn write_package(
     };
     children.retain(|(n, _)| n != "sheets");
     children.push(("sheets".into(), sheets_xml));
+    if !new_caches.is_empty() {
+        let entries: String = new_caches
+            .iter()
+            .map(|(id, rid)| format!(r#"<pivotCache cacheId="{id}" r:id="{rid}"/>"#))
+            .collect();
+        match children.iter_mut().find(|(n, _)| n == "pivotCaches") {
+            Some((_, x)) => {
+                let at = x.rfind("</").unwrap_or(x.len());
+                x.insert_str(at, &entries);
+            }
+            None => children.push((
+                "pivotCaches".into(),
+                format!("<pivotCaches>{entries}</pivotCaches>"),
+            )),
+        }
+    }
     let names_changed = source.is_none_or_changed(|s| s.names != model.names);
     if names_changed {
         children.retain(|(n, _)| n != "definedNames");
@@ -1938,9 +2147,120 @@ fn read_charts(
                         c1: c1.saturating_sub(1).max(c0),
                     },
                     from_file: true,
+                    part: Some(cp.as_str().to_string()),
                 });
             }
         }
+    }
+    out
+}
+
+const REL_PIVOT_TABLE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable";
+const REL_PIVOT_CACHE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition";
+const CT_PIVOT_TABLE: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml";
+const CT_PIVOT_CACHE: &str =
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml";
+
+/// PivotTables simple enough for the model: one row field, at most one
+/// column field and one data field over a worksheet range.
+fn read_pivots(pkg: &Package, sheet_part: &PartName) -> Vec<crate::model::PivotDef> {
+    let mut out = Vec::new();
+    let Ok(srels) = pkg.relationships(Some(sheet_part)) else {
+        return out;
+    };
+    let attr = |x: &str, name: &str| {
+        regex::Regex::new(&format!(r#"\b{name}="([^"]*)""#))
+            .unwrap()
+            .captures(x)
+            .map(|c| unescape(&c[1]))
+    };
+    let fields = |x: &str, tag: &str| -> Option<Vec<i64>> {
+        let block = regex::Regex::new(&format!(r"(?s)<{tag}\b[^>]*>(.*?)</{tag}>"))
+            .unwrap()
+            .captures(x)?;
+        Some(
+            re!(r#"<field x="(-?\d+)""#)
+                .captures_iter(&block[1])
+                .filter_map(|c| c[1].parse().ok())
+                .collect(),
+        )
+    };
+    for r in srels.of_type(REL_PIVOT_TABLE) {
+        let Ok(tp) = sheet_part.resolve(&r.target) else {
+            continue;
+        };
+        let Ok(tx) = part_text(pkg, &tp) else {
+            continue;
+        };
+        let Some(cp) = pkg.relationships(Some(&tp)).ok().and_then(|rr| {
+            rr.first_of_type(REL_PIVOT_CACHE)
+                .and_then(|c| tp.resolve(&c.target).ok())
+        }) else {
+            continue;
+        };
+        let Ok(cx) = part_text(pkg, &cp) else {
+            continue;
+        };
+        let rows = fields(&tx, "rowFields").unwrap_or_default();
+        let cols = fields(&tx, "colFields").unwrap_or_default();
+        let data: Vec<(u32, Option<String>)> = re!(r"<dataField\b[^>]*>")
+            .find_iter(&tx)
+            .filter_map(|m| {
+                Some((
+                    attr(m.as_str(), "fld")?.parse().ok()?,
+                    attr(m.as_str(), "subtotal"),
+                ))
+            })
+            .collect();
+        let Some(src) = re!(r"<worksheetSource\b[^>]*>")
+            .find(&cx)
+            .map(|m| m.as_str().to_string())
+        else {
+            continue;
+        };
+        let (Some(sref), Some(ssheet)) = (attr(&src, "ref"), attr(&src, "sheet")) else {
+            continue;
+        };
+        let (Some(source), Some(loc)) = (
+            parse_rect(&sref),
+            re!(r"<location\b[^>]*>")
+                .find(&tx)
+                .and_then(|m| attr(m.as_str(), "ref"))
+                .and_then(|r| parse_rect(&r)),
+        ) else {
+            continue;
+        };
+        if rows.len() != 1
+            || rows[0] < 0
+            || cols.len() > 1
+            || cols.first().is_some_and(|c| *c < 0)
+            || data.len() != 1
+        {
+            continue;
+        }
+        let function = data[0].1.clone().unwrap_or_else(|| "sum".into());
+        if !matches!(
+            function.as_str(),
+            "sum" | "average" | "count" | "max" | "min"
+        ) {
+            continue;
+        }
+        out.push(crate::model::PivotDef {
+            name: attr(&tx, "name").unwrap_or_else(|| "PivotTable".into()),
+            source_sheet: ssheet,
+            source,
+            rows: rows[0] as u32,
+            cols: cols.first().map(|c| *c as u32),
+            values: data[0].0,
+            function,
+            location: loc.start(),
+            extent: Some(loc),
+            part: Some(tp.as_str().to_string()),
+            cache_part: Some(cp.as_str().to_string()),
+        });
     }
     out
 }

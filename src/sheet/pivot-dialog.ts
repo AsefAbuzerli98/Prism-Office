@@ -24,6 +24,12 @@ export function openPivotDialog(ed: SheetEditor): HTMLDialogElement | null {
   const vals = select("values", false, Math.min(headers.length - 1, 1));
   const fn = h("select", { name: "fn" }, ...["SUM", "AVERAGE", "COUNT", "COUNTA", "MAX", "MIN"].map((f) => h("option", { value: f }, f)));
   const where = h("select", { name: "where" }, h("option", { value: "new" }, "New sheet"), h("option", { value: "here" }, "Right of the data"));
+  const kind = h(
+    "select",
+    { name: "kind" },
+    h("option", { value: "classic" }, "PivotTable (refresh with Refresh All)"),
+    h("option", { value: "formula" }, "PIVOTBY formula (always live)"),
+  );
   const dlg = h(
     "dialog",
     { class: "dialog pivot-dialog", "aria-label": "PivotTable" },
@@ -37,6 +43,7 @@ export function openPivotDialog(ed: SheetEditor): HTMLDialogElement | null {
       h("label", {}, "Values ", vals),
       h("label", {}, "Summarize by ", fn),
       h("label", {}, "Place in ", where),
+      h("label", {}, "Type ", kind),
       h("menu", {}, h("button", { value: "cancel" }, "Cancel"), h("button", { value: "ok", class: "primary" }, "Insert")),
     ),
   );
@@ -44,6 +51,26 @@ export function openPivotDialog(ed: SheetEditor): HTMLDialogElement | null {
     if (dlg.returnValue === "ok") {
       const colIdx = Number(cols.value);
       const toNew = where.value === "new";
+      if (kind.value === "classic") {
+        if (Number(vals.value) === Number(rows.value) || Number(vals.value) === colIdx) {
+          window.alert("Values must be a different field from Rows/Columns");
+        } else {
+          const fnName = fn.value.toLowerCase() === "counta" ? "count" : (fn.value.toLowerCase() as "sum");
+          let target = ed.sheet;
+          let at = { row: data.r0, col: data.c1 + 2 };
+          if (toNew) {
+            ed.execute("addSheet", `Pivot ${headers[Number(vals.value)] ?? ""}`.trim());
+            target = ed.sheet;
+            at = { row: 2, col: 0 };
+          }
+          const err = ed.addPivot(target, { name: "", sourceSheet: info.name, source: data, rows: Number(rows.value), cols: colIdx < 0 ? undefined : colIdx, values: Number(vals.value), function: fnName, location: at });
+          if (err) window.alert(err);
+          else ed.selectCell(at.row, at.col);
+        }
+        dlg.remove();
+        ed.focus();
+        return;
+      }
       const formula = pivotFormula({ sheet: info.name, data, rows: Number(rows.value), cols: colIdx < 0 ? null : colIdx, values: Number(vals.value), fn: fn.value as Aggregate, qualify: toNew });
       if (toNew) {
         ed.execute("addSheet", `Pivot ${headers[Number(vals.value)] ?? ""}`.trim());

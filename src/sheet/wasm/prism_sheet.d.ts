@@ -5,6 +5,10 @@ export class SheetEngine {
     free(): void;
     [Symbol.dispose](): void;
     addChart(sheet: number, def_json: string): number;
+    /**
+     * Add a classic PivotTable (`PivotDef` JSON) and fill it.
+     */
+    addPivot(sheet: number, def_json: string, now: number): string;
     addSheet(name: string): number;
     applyStyle(sheet: number, r0: number, c0: number, r1: number, c1: number, num_format: string | null | undefined, patch_json: string): void;
     /**
@@ -29,8 +33,14 @@ export class SheetEngine {
      */
     constructor(model_json: string, now: number);
     paste(src_sheet: number, sr0: number, sc0: number, sr1: number, sc1: number, dst_sheet: number, dr: number, dc: number, now: number): string;
+    /**
+     * PivotTables of a sheet.
+     */
+    pivots(sheet: number): string;
     recalc(now: number): string;
+    refreshPivots(now: number): string;
     removeChart(sheet: number, index: number): void;
+    removePivot(sheet: number, index: number, now: number): string;
     renameSheet(sheet: number, name: string, now: number): string;
     /**
      * Negative width resets to the default.
@@ -64,6 +74,7 @@ export interface InitOutput {
     readonly __wbg_sheetengine_free: (a: number, b: number) => void;
     readonly profileLoad: (a: number, b: number) => [number, number];
     readonly sheetengine_addChart: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly sheetengine_addPivot: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly sheetengine_addSheet: (a: number, b: number, c: number) => number;
     readonly sheetengine_applyStyle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
     readonly sheetengine_asyncRequests: (a: number) => [number, number];
@@ -76,8 +87,11 @@ export interface InitOutput {
     readonly sheetengine_model: (a: number) => [number, number];
     readonly sheetengine_new: (a: number, b: number, c: number) => [number, number, number];
     readonly sheetengine_paste: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
+    readonly sheetengine_pivots: (a: number, b: number) => [number, number];
     readonly sheetengine_recalc: (a: number, b: number) => [number, number];
+    readonly sheetengine_refreshPivots: (a: number, b: number) => [number, number, number, number];
     readonly sheetengine_removeChart: (a: number, b: number, c: number) => void;
+    readonly sheetengine_removePivot: (a: number, b: number, c: number, d: number) => [number, number];
     readonly sheetengine_renameSheet: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly sheetengine_setColWidth: (a: number, b: number, c: number, d: number) => void;
     readonly sheetengine_setFrozen: (a: number, b: number, c: number, d: number) => void;

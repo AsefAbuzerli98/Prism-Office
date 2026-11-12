@@ -153,6 +153,37 @@ pub struct ChartDef {
     /// Read from the file: its parts are kept as-is on save.
     #[serde(default, skip_serializing_if = "no")]
     pub from_file: bool,
+    /// Chart part it was read from (an edited file chart is rewritten in place).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part: Option<String>,
+}
+
+/// A classic PivotTable: values written into the sheet on refresh, saved to
+/// XLSX with a pivot cache (refreshed by Excel on open).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PivotDef {
+    pub name: String,
+    pub source_sheet: String,
+    /// Source table including its header row.
+    pub source: Rect,
+    /// Column offsets within `source`.
+    pub rows: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cols: Option<u32>,
+    pub values: u32,
+    /// sum | average | count | max | min
+    pub function: String,
+    /// Top-left cell of the table.
+    pub location: CellRef,
+    /// Cells covered by the last refresh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extent: Option<Rect>,
+    /// Pivot table / cache parts it was read from (rewritten in place on save).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_part: Option<String>,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -193,6 +224,8 @@ pub struct SheetModel {
     pub tables: Vec<TableDef>,
     #[serde(default)]
     pub charts: Vec<ChartDef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pivots: Vec<PivotDef>,
     /// Index of the worksheet in the source file this sheet came from.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<usize>,
@@ -257,6 +290,7 @@ impl Workbook {
             s.hidden = sm.hidden;
             s.tables = sm.tables.clone();
             s.charts = sm.charts.clone();
+            s.pivots = sm.pivots.clone();
             s.source = sm.source;
             wb.sheets.push(s);
         }
@@ -347,6 +381,7 @@ impl Workbook {
                     hidden: s.hidden,
                     tables: s.tables.clone(),
                     charts: s.charts.clone(),
+                    pivots: s.pivots.clone(),
                     source: s.source,
                 })
                 .collect(),

@@ -346,7 +346,10 @@ export class Shell {
   private async refreshConnections() {
     const ed = this.activeSheet;
     if (!ed) return;
-    if (!ed.connections.length) return this.flash(t("sheet.noConnections", {}, "This workbook has no data connections in this session"));
+    if (!ed.connections.length) {
+      ed.execute("refreshPivots");
+      return this.flash(t("sheet.noConnections", {}, "This workbook has no data connections in this session"));
+    }
     await this.guard(async () => {
       for (const c of ed.connections) {
         let rows: unknown[][];
@@ -360,6 +363,7 @@ export class Shell {
         }
         ed.replaceRows(c.sheet, rows);
       }
+      ed.execute("refreshPivots");
       this.flash(t("sheet.refreshed", { n: ed.connections.length }, `Refreshed ${ed.connections.length} connection(s)`));
     });
   }

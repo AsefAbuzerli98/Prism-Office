@@ -15,6 +15,7 @@ pub mod fxhash;
 pub mod model;
 pub mod numfmt;
 pub mod parser;
+pub mod pivot;
 pub mod value;
 #[cfg(feature = "wasm")]
 pub mod wasm;

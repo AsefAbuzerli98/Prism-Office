@@ -567,6 +567,148 @@ impl Engine {
             .unwrap_or_default()
     }
 
+    /// Add a classic PivotTable and fill it.
+    pub fn add_pivot(
+        &mut self,
+        sheet: usize,
+        def: crate::model::PivotDef,
+        now: f64,
+    ) -> Result<Change, String> {
+        self.wb.sheets.get(sheet).ok_or("no such sheet")?;
+        let mut def = def;
+        if def.name.is_empty() {
+            let n = self.wb.sheets.iter().map(|s| s.pivots.len()).sum::<usize>() + 1;
+            def.name = format!("PivotTable{n}");
+        }
+        def.extent = None;
+        self.wb.sheets[sheet].pivots.push(def);
+        let i = self.wb.sheets[sheet].pivots.len() - 1;
+        match self.refresh_pivot(sheet, i, now) {
+            Ok(c) => Ok(c),
+            Err(e) => {
+                self.wb.sheets[sheet].pivots.pop();
+                Err(e)
+            }
+        }
+    }
+
+    /// Recompute a PivotTable from its source and rewrite its cells.
+    pub fn refresh_pivot(
+        &mut self,
+        sheet: usize,
+        index: usize,
+        now: f64,
+    ) -> Result<Change, String> {
+        let p = self
+            .wb
+            .sheets
+            .get(sheet)
+            .and_then(|s| s.pivots.get(index))
+            .cloned()
+            .ok_or("no such PivotTable")?;
+        let t = crate::pivot::compute(&self.wb, &p)?;
+        let (rows, cols) = (
+            t.cells.len() as u32,
+            t.cells.first().map_or(1, |r| r.len()) as u32,
+        );
+        let extent = Rect {
+            r0: p.location.row,
+            c0: p.location.col,
+            r1: p.location.row + rows - 1,
+            c1: p.location.col + cols - 1,
+        };
+        if extent.r1 >= crate::addr::MAX_ROWS || extent.c1 >= crate::addr::MAX_COLS {
+            return Err("the PivotTable does not fit on the sheet".into());
+        }
+        // refuse to overwrite other content (Excel asks the same)
+        let old = p.extent;
+        let sh = &self.wb.sheets[sheet];
+        let clash = sh.cells.iter().any(|(k, c)| {
+            extent.contains(*k)
+                && !old.is_some_and(|o| o.contains(*k))
+                && !matches!(c.input, Input::Value(Value::Empty))
+        }) || sh.spills.values().any(|r| r.intersects(&extent))
+            || sh
+                .pivots
+                .iter()
+                .enumerate()
+                .any(|(i, q)| i != index && q.extent.is_some_and(|e| e.intersects(&extent)));
+        if clash {
+            return Err("there is already data where the PivotTable would go".into());
+        }
+        if let Some(o) = old {
+            let keys: Vec<CellRef> = self.wb.sheets[sheet]
+                .cells
+                .keys()
+                .copied()
+                .filter(|k| o.contains(*k))
+                .collect();
+            for k in keys {
+                self.wb.clear_cell(sheet, k);
+            }
+        }
+        let bold = self.wb.style_index(
+            "General",
+            &CellStyle {
+                bold: true,
+                ..Default::default()
+            },
+        );
+        for (r, row) in t.cells.iter().enumerate() {
+            let style = if t.bold_rows.contains(&r) { bold } else { 0 };
+            for (c, v) in row.iter().enumerate() {
+                let k = CellRef::new(extent.r0 + r as u32, extent.c0 + c as u32);
+                if matches!(v, Value::Empty) && style == 0 {
+                    continue;
+                }
+                self.wb
+                    .set_cell_input(sheet, k, Input::Value(v.clone()), style);
+            }
+        }
+        self.wb.sheets[sheet].pivots[index].extent = Some(extent);
+        Ok(self.recalc(now))
+    }
+
+    /// Refresh every PivotTable (Refresh All).
+    pub fn refresh_pivots(&mut self, now: f64) -> Result<Change, String> {
+        let list: Vec<(usize, usize)> = self
+            .wb
+            .sheets
+            .iter()
+            .enumerate()
+            .flat_map(|(s, sh)| (0..sh.pivots.len()).map(move |i| (s, i)))
+            .collect();
+        let mut last = self.recalc(now);
+        for (s, i) in list {
+            last = self.refresh_pivot(s, i, now)?;
+        }
+        Ok(last)
+    }
+
+    pub fn remove_pivot(&mut self, sheet: usize, index: usize, now: f64) -> Change {
+        if let Some(p) = self
+            .wb
+            .sheets
+            .get(sheet)
+            .and_then(|s| s.pivots.get(index))
+            .cloned()
+        {
+            if let Some(o) = p.extent {
+                let keys: Vec<CellRef> = self.wb.sheets[sheet]
+                    .cells
+                    .keys()
+                    .copied()
+                    .filter(|k| o.contains(*k))
+                    .collect();
+                for k in keys {
+                    self.wb.clear_cell(sheet, k);
+                }
+            }
+            self.wb.sheets[sheet].pivots.remove(index);
+        }
+        self.recalc(now)
+    }
+
     /// Function names for autocomplete.
     pub fn function_names() -> Vec<&'static str> {
         crate::functions::function_names()

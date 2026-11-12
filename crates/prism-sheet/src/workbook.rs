@@ -91,6 +91,7 @@ pub struct Sheet {
     pub spill_owner: FxHashMap<CellRef, CellRef>,
     pub tables: Vec<TableDef>,
     pub charts: Vec<crate::model::ChartDef>,
+    pub pivots: Vec<crate::model::PivotDef>,
     pub col_widths: BTreeMap<u32, f64>,
     pub row_heights: BTreeMap<u32, f64>,
     pub merges: Vec<Rect>,
@@ -397,7 +398,7 @@ impl Workbook {
         Ok(())
     }
 
-    pub(crate) fn set_cell_input(&mut self, sheet: usize, c: CellRef, input: Input, style: u32) {
+    pub fn set_cell_input(&mut self, sheet: usize, c: CellRef, input: Input, style: u32) {
         let s = &mut self.sheets[sheet];
         let is_formula = matches!(input, Input::Formula { .. });
         let value = match &input {

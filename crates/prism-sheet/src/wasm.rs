@@ -216,6 +216,39 @@ impl SheetEngine {
         self.e.remove_chart(sheet, index);
     }
 
+    /// Add a classic PivotTable (`PivotDef` JSON) and fill it.
+    #[wasm_bindgen(js_name = addPivot)]
+    pub fn add_pivot(&mut self, sheet: usize, def_json: &str, now: f64) -> Result<String, JsError> {
+        let def = serde_json::from_str(def_json).map_err(js)?;
+        self.e
+            .add_pivot(sheet, def, now)
+            .map(|c| json(&c))
+            .map_err(js)
+    }
+
+    #[wasm_bindgen(js_name = refreshPivots)]
+    pub fn refresh_pivots(&mut self, now: f64) -> Result<String, JsError> {
+        self.e.refresh_pivots(now).map(|c| json(&c)).map_err(js)
+    }
+
+    #[wasm_bindgen(js_name = removePivot)]
+    pub fn remove_pivot(&mut self, sheet: usize, index: usize, now: f64) -> String {
+        json(&self.e.remove_pivot(sheet, index, now))
+    }
+
+    /// PivotTables of a sheet.
+    pub fn pivots(&self, sheet: usize) -> String {
+        json(
+            &self
+                .e
+                .wb
+                .sheets
+                .get(sheet)
+                .map(|s| s.pivots.clone())
+                .unwrap_or_default(),
+        )
+    }
+
     /// Pending `=PY` requests.
     #[wasm_bindgen(js_name = asyncRequests)]
     pub fn async_requests(&self) -> String {

@@ -50,6 +50,21 @@ export interface ChartDef {
   data: Rect;
   anchor: Rect;
   fromFile?: boolean;
+  part?: string;
+}
+
+export interface PivotDef {
+  name: string;
+  sourceSheet: string;
+  source: Rect;
+  rows: number;
+  cols?: number;
+  values: number;
+  function: "sum" | "average" | "count" | "max" | "min";
+  location: { row: number; col: number };
+  extent?: Rect;
+  part?: string;
+  cachePart?: string;
 }
 
 export interface SheetModel {
@@ -62,6 +77,7 @@ export interface SheetModel {
   hidden: boolean;
   tables: TableDef[];
   charts?: ChartDef[];
+  pivots?: PivotDef[];
   source?: number;
 }
 

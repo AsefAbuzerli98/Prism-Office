@@ -27,6 +27,35 @@ export class SheetEngine {
         return ret[0] >>> 0;
     }
     /**
+     * Add a classic PivotTable (`PivotDef` JSON) and fill it.
+     * @param {number} sheet
+     * @param {string} def_json
+     * @param {number} now
+     * @returns {string}
+     */
+    addPivot(sheet, def_json, now) {
+        let deferred5_0;
+        let deferred5_1;
+        try {
+            const val2 = +sheet;
+            const val3 = +now;
+            const ptr0 = passStringToWasm0(def_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ret = wasm.sheetengine_addPivot(this.__wbg_ptr, val2, ptr0, len0, val3);
+            var ptr4 = ret[0];
+            var len4 = ret[1];
+            if (ret[3]) {
+                ptr4 = 0; len4 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred5_0 = ptr4;
+            deferred5_1 = len4;
+            return getStringFromWasm0(ptr4, len4);
+        } finally {
+            wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+        }
+    }
+    /**
      * @param {string} name
      * @returns {number}
      */
@@ -265,6 +294,23 @@ export class SheetEngine {
         }
     }
     /**
+     * PivotTables of a sheet.
+     * @param {number} sheet
+     * @returns {string}
+     */
+    pivots(sheet) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.sheetengine_pivots(this.__wbg_ptr, sheet);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
      * @param {number} now
      * @returns {string}
      */
@@ -281,11 +327,51 @@ export class SheetEngine {
         }
     }
     /**
+     * @param {number} now
+     * @returns {string}
+     */
+    refreshPivots(now) {
+        let deferred2_0;
+        let deferred2_1;
+        try {
+            const ret = wasm.sheetengine_refreshPivots(this.__wbg_ptr, now);
+            var ptr1 = ret[0];
+            var len1 = ret[1];
+            if (ret[3]) {
+                ptr1 = 0; len1 = 0;
+                throw takeFromExternrefTable0(ret[2]);
+            }
+            deferred2_0 = ptr1;
+            deferred2_1 = len1;
+            return getStringFromWasm0(ptr1, len1);
+        } finally {
+            wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+        }
+    }
+    /**
      * @param {number} sheet
      * @param {number} index
      */
     removeChart(sheet, index) {
         wasm.sheetengine_removeChart(this.__wbg_ptr, sheet, index);
+    }
+    /**
+     * @param {number} sheet
+     * @param {number} index
+     * @param {number} now
+     * @returns {string}
+     */
+    removePivot(sheet, index, now) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.sheetengine_removePivot(this.__wbg_ptr, sheet, index, now);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
     }
     /**
      * @param {number} sheet

@@ -10,7 +10,7 @@ import type { EngineView } from "../word/editor";
 import { drawChart } from "./charts";
 import { loadEngine, Workbook, type AsyncRequest, type Change, type ChartData, type SheetInfo, type ViewCell } from "./engine";
 import { a1, Axis, colChars, colName, colPx, DEFAULT_COL_PX, DEFAULT_ROW_PX, MAX_COLS, MAX_ROWS, parseRange, rowPt, rowPx, tokenAt } from "./geometry";
-import type { CellStyle, ChartDef, ChartKind, Rect } from "./model";
+import type { CellStyle, ChartDef, ChartKind, PivotDef, Rect } from "./model";
 
 const HDR_W_MIN = 46;
 const HDR_H = 22;
@@ -307,6 +307,15 @@ export class SheetEditor implements EngineView {
     this.scroll.addEventListener("mousedown", (e) => this.onMouseDown(e));
     this.scroll.addEventListener("dblclick", (e) => {
       const p = this.point(e);
+      const hit = this.chartAt(p.x, p.y);
+      if (hit >= 0) {
+        const t = window.prompt("Chart title", this.charts[hit]?.chart.title ?? "");
+        if (t !== null) {
+          this.selectedChart = hit;
+          this.editChart({ title: t });
+        }
+        return;
+      }
       if (p.y > HDR_H && p.x > this.hdrW) this.beginEdit(null);
     });
     window.addEventListener("mousemove", (e) => this.onMouseMove(e));
@@ -585,7 +594,7 @@ export class SheetEditor implements EngineView {
       const moved = this.chartDrag;
       this.chartDrag = null;
       if (ch && moved && JSON.stringify(moved.anchor) !== JSON.stringify(d.anchor)) {
-        this.wb.updateChart(this.sheet, d.index!, { ...ch, anchor: moved.anchor });
+        this.wb.updateChart(this.sheet, d.index!, { ...ch, anchor: moved.anchor, fromFile: false });
         this.changed({ changed: [], evaluated: 0, circular: [], asyncRequests: 0 });
       } else this.requestDraw();
     } else if (d.kind === "colResize") {
@@ -1208,7 +1217,18 @@ export class SheetEditor implements EngineView {
         this.beginEdit(value ?? "=");
         return true;
       case "chart":
-        this.insertChart((value as ChartKind) || "column");
+        if (this.selectedChart !== null) this.editChart({ kind: (value as ChartKind) || "column" });
+        else this.insertChart((value as ChartKind) || "column");
+        return true;
+      case "chartTitle":
+        if (this.selectedChart !== null) this.editChart({ title: value ?? "" });
+        return true;
+      case "refreshPivots":
+        try {
+          this.changed(this.wb.refreshPivots());
+        } catch (err) {
+          this.opts.onError?.(String(err instanceof Error ? err.message : err));
+        }
         return true;
       case "clear":
         this.clearSelection();
@@ -1270,6 +1290,26 @@ export class SheetEditor implements EngineView {
       if (x >= this.colX(a.c0) && x <= this.colX(a.c1 + 1) && y >= this.rowY(a.r0) && y <= this.rowY(a.r1 + 1)) return i;
     }
     return -1;
+  }
+
+  /** Change the selected chart (file charts become editor-owned). */
+  editChart(patch: Partial<ChartDef>) {
+    if (!this.wb || this.selectedChart === null) return;
+    const cur = this.wb.charts(this.sheet)[this.selectedChart]?.chart;
+    if (!cur) return;
+    this.wb.updateChart(this.sheet, this.selectedChart, { ...cur, ...patch, fromFile: false });
+    this.changed({ changed: [], evaluated: 0, circular: [], asyncRequests: 0 });
+  }
+
+  /** Add a classic PivotTable; returns an error message or null. */
+  addPivot(sheet: number, def: PivotDef): string | null {
+    if (!this.wb) return "no workbook";
+    try {
+      this.changed(this.wb.addPivot(sheet, def));
+      return null;
+    } catch (err) {
+      return String(err instanceof Error ? err.message : err);
+    }
   }
 
   /** Insert a chart of the selected data next to it. */
