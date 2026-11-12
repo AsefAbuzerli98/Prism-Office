@@ -139,6 +139,10 @@ impl DocumentRegistry {
         if doc.word_dirty {
             if let Some(w) = &doc.word {
                 prism_word::write_package(&mut doc.package, w)?;
+                // pick up ids assigned on write (new headers, pictures)
+                let mut fresh = prism_word::read_package(&doc.package)?;
+                fresh.blocks = w.blocks.clone();
+                doc.word = Some(fresh);
             }
             doc.word_dirty = false;
         }
@@ -173,6 +177,19 @@ impl DocumentRegistry {
             Some(w) => w,
             None => prism_word::read_package(&doc.package)?,
         };
+        // Headers created in the editor carry an empty relId until saved;
+        // adopt the id assigned on the previous save.
+        for hf in &mut content.headers {
+            if hf.rel_id.is_empty() {
+                if let Some(b) = base
+                    .headers
+                    .iter()
+                    .find(|b| b.kind == hf.kind && b.which == hf.which && !b.rel_id.is_empty())
+                {
+                    hf.rel_id = b.rel_id.clone();
+                }
+            }
+        }
         content.styles = base.styles;
         content.numbering = base.numbering;
         content.default_run = base.default_run;

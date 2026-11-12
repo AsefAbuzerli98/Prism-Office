@@ -1,5 +1,5 @@
-/** Canvas painter for laid-out pages, selection and caret (P2-07, 2D backend). */
-import type { Frag, Layout, Line } from "./layout";
+/** Canvas painter for laid-out pages, selection and caret (P2-07). */
+import { sameContainer, type ContainerRef, type Frag, type Layout, type Line } from "./layout";
 
 export const PAGE_GAP = 24;
 
@@ -17,6 +17,13 @@ export interface Rect {
   h: number;
 }
 
+export interface PaintOptions {
+  /** Container being edited (headers/footers are dimmed otherwise). */
+  active: ContainerRef | null;
+  images: (relId: string) => CanvasImageSource | null;
+  zoom?: number;
+}
+
 export function pageOrigin(layout: Layout, index: number, viewportWidth: number) {
   return {
     x: Math.max(PAGE_GAP, (viewportWidth - layout.width) / 2),
@@ -28,14 +35,85 @@ export function totalHeight(layout: Layout) {
   return PAGE_GAP + layout.pages.length * (layout.height + PAGE_GAP);
 }
 
-function drawFrag(ctx: CanvasRenderingContext2D, f: Frag, line: Line, ox: number, oy: number) {
+function drawShape(ctx: CanvasRenderingContext2D, f: Frag, x: number, y: number) {
+  const w = f.width;
+  const h = f.height ?? 0;
+  ctx.save();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = `#${f.stroke || "1F2937"}`;
+  ctx.fillStyle = f.fill ? `#${f.fill}` : "transparent";
+  ctx.beginPath();
+  switch (f.preset) {
+    case "ellipse":
+      ctx.ellipse(x + w / 2, y + h / 2, w / 2 - 1, h / 2 - 1, 0, 0, Math.PI * 2);
+      break;
+    case "triangle":
+      ctx.moveTo(x + w / 2, y + 1);
+      ctx.lineTo(x + w - 1, y + h - 1);
+      ctx.lineTo(x + 1, y + h - 1);
+      ctx.closePath();
+      break;
+    case "line":
+      ctx.moveTo(x, y + h);
+      ctx.lineTo(x + w, y);
+      break;
+    case "rightArrow": {
+      const hy = h / 2;
+      ctx.moveTo(x, y + hy);
+      ctx.lineTo(x + w - 2, y + hy);
+      ctx.moveTo(x + w - Math.min(14, w / 3), y + hy - Math.min(8, h / 2));
+      ctx.lineTo(x + w - 2, y + hy);
+      ctx.lineTo(x + w - Math.min(14, w / 3), y + hy + Math.min(8, h / 2));
+      break;
+    }
+    case "diamond":
+      ctx.moveTo(x + w / 2, y + 1);
+      ctx.lineTo(x + w - 1, y + h / 2);
+      ctx.lineTo(x + w / 2, y + h - 1);
+      ctx.lineTo(x + 1, y + h / 2);
+      ctx.closePath();
+      break;
+    default:
+      ctx.rect(x + 1, y + 1, w - 2, h - 2);
+  }
+  if (f.fill) ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawFrag(ctx: CanvasRenderingContext2D, f: Frag, line: Line, ox: number, oy: number, opts: PaintOptions) {
   const s = f.style;
   const baseY = oy + line.y + line.baseline + (s.vert === "superscript" ? -s.sizePx * 0.55 : s.vert === "subscript" ? s.sizePx * 0.25 : 0);
-  if (s.highlight && f.kind !== "marker") {
+  if (s.highlight && f.kind !== "marker" && f.kind !== "image" && f.kind !== "shape") {
     ctx.fillStyle = s.highlight;
     ctx.fillRect(ox + f.x, oy + line.y, f.width, line.height);
   }
-  if (f.kind === "tab") return;
+  if (f.kind === "image" || f.kind === "shape") {
+    const top = oy + line.y + line.baseline - (f.height ?? 0);
+    if (f.kind === "shape") return drawShape(ctx, f, ox + f.x, top);
+    const img = f.relId ? opts.images(f.relId) : null;
+    if (img) ctx.drawImage(img, ox + f.x, top, f.width, f.height ?? 0);
+    else {
+      ctx.fillStyle = "#f1f5f9";
+      ctx.fillRect(ox + f.x, top, f.width, f.height ?? 0);
+      ctx.strokeStyle = "#cbd5e1";
+      ctx.strokeRect(ox + f.x + 0.5, top + 0.5, f.width - 1, (f.height ?? 0) - 1);
+    }
+    return;
+  }
+  if (f.kind === "tab") {
+    if (f.leader && f.width > 8) {
+      ctx.font = s.font;
+      ctx.fillStyle = s.color;
+      const unit = ctx.measureText(f.leader + " ").width || 4;
+      let x = ox + f.x + 2;
+      while (x + unit < ox + f.x + f.width - 2) {
+        ctx.fillText(f.leader, x, baseY);
+        x += unit;
+      }
+    }
+    return;
+  }
   if (f.kind === "opaque") {
     if (!f.text) return;
     ctx.fillStyle = "#f1f5f9";
@@ -47,12 +125,19 @@ function drawFrag(ctx: CanvasRenderingContext2D, f: Frag, line: Line, ox: number
     ctx.fillText(f.text, ox + f.x + 3, baseY);
     return;
   }
+  const text = f.text.replace(/­/g, "");
   ctx.font = s.font;
   ctx.fillStyle = s.color;
-  ctx.fillText(f.text, ox + f.x, baseY);
-  if ((s.underline || s.strike) && f.text.trim()) {
-    const w = f.width - (/\s$/.test(f.text) ? ctx.measureText(f.text.match(/\s+$/)![0]).width : 0);
-    ctx.fillRect(ox + f.x, s.underline ? baseY + Math.max(1, s.sizePx * 0.08) : baseY - s.sizePx * 0.3, w, Math.max(1, s.sizePx / 16));
+  if (f.rtl) {
+    ctx.direction = "rtl";
+    ctx.textAlign = "right";
+    ctx.fillText(text, ox + f.x + f.width, baseY);
+    ctx.direction = "ltr";
+    ctx.textAlign = "left";
+  } else ctx.fillText(text, ox + f.x, baseY);
+  if ((s.underline || s.strike) && text.trim()) {
+    const w = f.width - (/\s$/.test(text) ? ctx.measureText(text.match(/\s+$/)![0]).width : 0);
+    ctx.fillRect(ox + f.x, s.underline && !s.strike ? baseY + Math.max(1, s.sizePx * 0.08) : baseY - s.sizePx * 0.3, w, Math.max(1, s.sizePx / 16));
   }
 }
 
@@ -64,12 +149,14 @@ export function paint(
   selection: Rect[],
   caret: Rect | null,
   dark: boolean,
+  opts: PaintOptions = { active: null, images: () => null },
 ) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.fillStyle = dark ? "#18181b" : "#eef0f3";
   ctx.fillRect(0, 0, vp.width, vp.height);
   ctx.translate(-vp.scrollLeft, -vp.scrollTop);
   ctx.textBaseline = "alphabetic";
+  const editingHeader = opts.active?.type === "header";
   for (const page of layout.pages) {
     const o = pageOrigin(layout, page.index, vp.width);
     if (o.y + layout.height < vp.scrollTop || o.y > vp.scrollTop + vp.height) continue;
@@ -77,6 +164,10 @@ export function paint(
     ctx.fillRect(o.x + 1, o.y + 2, layout.width, layout.height);
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(o.x, o.y, layout.width, layout.height);
+    for (const d of page.decos.filter((d) => d.fill)) {
+      ctx.fillStyle = d.fill!;
+      ctx.fillRect(o.x + d.x, o.y + d.y, d.w, d.h);
+    }
     for (const b of page.boxes) {
       ctx.fillStyle = "#f8fafc";
       ctx.strokeStyle = "#cbd5e1";
@@ -86,11 +177,26 @@ export function paint(
       ctx.setLineDash([]);
       ctx.fillStyle = "#64748b";
       ctx.font = "13px system-ui, sans-serif";
-      ctx.fillText(`⟦${b.label}⟧ — preserved, editing arrives in a later phase`, o.x + b.left + 10, o.y + b.y + b.height / 2 + 4);
+      ctx.fillText(`⟦${b.label}⟧ — preserved`, o.x + b.left + 10, o.y + b.y + b.height / 2 + 4);
     }
     for (const line of page.lines) {
       if (o.y + line.y > vp.scrollTop + vp.height || o.y + line.y + line.height < vp.scrollTop) continue;
-      for (const f of line.frags) drawFrag(ctx, f, line, o.x, o.y);
+      const dim = line.container?.type === "header" && !editingHeader;
+      if (dim) ctx.globalAlpha = 0.55;
+      for (const f of line.frags) drawFrag(ctx, f, line, o.x, o.y, opts);
+      if (dim) ctx.globalAlpha = 1;
+    }
+    for (const d of page.decos.filter((d) => d.stroke)) {
+      ctx.fillStyle = d.stroke!;
+      ctx.fillRect(o.x + d.x, o.y + d.y, Math.max(d.w, 0.75), Math.max(d.h, 0.75));
+    }
+    if (opts.active && opts.active.type !== "cell") {
+      for (const a of page.areas.filter((a) => sameContainer(a.container, opts.active))) {
+        ctx.strokeStyle = "#2563eb";
+        ctx.setLineDash([5, 4]);
+        ctx.strokeRect(o.x + a.x - 4.5, o.y + a.y - 4.5, a.w + 9, a.h + 9);
+        ctx.setLineDash([]);
+      }
     }
   }
   ctx.fillStyle = "rgba(37, 99, 235, 0.25)";

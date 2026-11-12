@@ -86,6 +86,14 @@ export interface HostBridge {
   /** Word-processing model of a document (Document mode). */
   getWordDocument(id: number): Promise<WordDocument>;
   updateWordDocument(id: number, content: WordDocument): Promise<void>;
+  /** Picture bytes (base64) for an image relationship. */
+  getWordImage(id: number, relId: string): Promise<{ mime: string; data: string } | null>;
+  /** Store a picture in the package; returns its relationship id and EMU size. */
+  addWordImage(id: number, base64: string): Promise<{ relId: string; cx: number; cy: number }>;
+  /** Fonts embedded in the document (base64 TrueType/OpenType). */
+  getWordFonts(id: number): Promise<{ name: string; style: string; data: string }[]>;
+  /** Let the user choose a picture file; resolves to base64 bytes or null. */
+  pickImage(): Promise<string | null>;
 
   openDocumentWindow(id: number): Promise<void>;
   closeCurrentWindow(): Promise<void>;
@@ -164,6 +172,18 @@ export class TauriHost implements HostBridge {
   }
   updateWordDocument(id: number, content: WordDocument) {
     return this.api.invoke<void>("update_word_document", { id, content });
+  }
+  getWordImage(id: number, relId: string) {
+    return this.api.invoke<{ mime: string; data: string } | null>("get_word_image", { id, relId });
+  }
+  addWordImage(id: number, data: string) {
+    return this.api.invoke<{ relId: string; cx: number; cy: number }>("add_word_image", { id, data });
+  }
+  getWordFonts(id: number) {
+    return this.api.invoke<{ name: string; style: string; data: string }[]>("get_word_fonts", { id });
+  }
+  pickImage() {
+    return pickImageFile();
   }
   openDocumentWindow(id: number) {
     return this.api.invoke<void>("open_document_window", { id });
@@ -301,6 +321,29 @@ export class BrowserHost implements HostBridge {
     this.words.set(id, structuredClone(content));
   }
 
+  private images = new Map<string, { mime: string; data: string }>();
+  async getWordImage(id: number, relId: string) {
+    return this.images.get(`${id}:${relId}`) ?? null;
+  }
+  async addWordImage(id: number, data: string) {
+    const info = imageInfo(data);
+    const relId = `rIdImg${this.images.size + 1}`;
+    this.images.set(`${id}:${relId}`, { mime: info.mime, data });
+    let cx = info.w * 9525;
+    let cy = info.h * 9525;
+    if (cx > 5_486_400) {
+      cy = Math.round((cy * 5_486_400) / cx);
+      cx = 5_486_400;
+    }
+    return { relId, cx, cy };
+  }
+  async getWordFonts() {
+    return [];
+  }
+  pickImage(): Promise<string | null> {
+    return pickImageFile();
+  }
+
   async openDocumentWindow(_id: number): Promise<void> {
     throw new Error("Separate windows are only available in the desktop app");
   }
@@ -393,6 +436,44 @@ export class BrowserHost implements HostBridge {
     this.emit({ type: "documentOpened", info: { ...info } });
     return { ...info };
   }
+}
+
+/** Pixel size and MIME type from base64 PNG/JPEG/GIF bytes. */
+export function imageInfo(base64: string): { w: number; h: number; mime: string } {
+  const bin = atob(base64.slice(0, 64 * 1024));
+  const b = (i: number) => bin.charCodeAt(i);
+  if (bin.startsWith("\x89PNG")) return { w: (b(16) << 24) | (b(17) << 16) | (b(18) << 8) | b(19), h: (b(20) << 24) | (b(21) << 16) | (b(22) << 8) | b(23), mime: "image/png" };
+  if (bin.startsWith("GIF8")) return { w: b(6) | (b(7) << 8), h: b(8) | (b(9) << 8), mime: "image/gif" };
+  if (b(0) === 0xff && b(1) === 0xd8) {
+    let i = 2;
+    while (i + 9 < bin.length) {
+      if (b(i) !== 0xff) { i++; continue; }
+      const m = b(i + 1);
+      const len = (b(i + 2) << 8) | b(i + 3);
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { h: (b(i + 5) << 8) | b(i + 6), w: (b(i + 7) << 8) | b(i + 8), mime: "image/jpeg" };
+      i += 2 + len;
+    }
+    return { w: 400, h: 300, mime: "image/jpeg" };
+  }
+  return { w: 400, h: 300, mime: "application/octet-stream" };
+}
+
+/** Open a file chooser for images and read the choice as base64. */
+export function pickImageFile(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/png,image/jpeg,image/gif,image/webp,image/bmp";
+    input.onchange = () => {
+      const f = input.files?.[0];
+      if (!f) return resolve(null);
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(",")[1] ?? null);
+      r.onerror = () => resolve(null);
+      r.readAsDataURL(f);
+    };
+    input.click();
+  });
 }
 
 /** Pick the Tauri bridge when running inside the native shell. */

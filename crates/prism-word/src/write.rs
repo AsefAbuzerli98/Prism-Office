@@ -841,6 +841,8 @@ fn ensure_styles(pkg: &mut Package, main: &PartName, doc: &WordDocument) -> Resu
 /// list/style definitions and hyperlink relationships it needs.
 pub fn write_package(pkg: &mut Package, doc: &WordDocument) -> Result<()> {
     let main = pkg.main_part()?;
+    let prepared = crate::parts::prepare_new_headers(pkg, &main, doc)?;
+    let doc = &prepared;
     let mut rels = pkg.relationships(Some(&main))?;
     let original = pkg.part(&main).map(<[u8]>::to_vec);
     let xml = write_document_xml(original.as_deref(), doc, &mut |target: &str| {

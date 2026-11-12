@@ -6,18 +6,19 @@ export interface Snapshot {
   selection: Selection;
 }
 
-interface Entry extends Snapshot {
+interface Entry<S> {
+  state: S;
   kind: string;
   at: number;
 }
 
 /**
- * Undo/redo over immutable block snapshots. Consecutive edits of the same
+ * Undo/redo over immutable snapshots. Consecutive edits of the same
  * groupable kind (typing, deleting) within `groupMs` merge into one step.
  */
-export class History {
-  private undoStack: Entry[] = [];
-  private redoStack: Snapshot[] = [];
+export class History<S = Snapshot> {
+  private undoStack: Entry<S>[] = [];
+  private redoStack: S[] = [];
 
   constructor(
     private readonly limit = 500,
@@ -26,12 +27,12 @@ export class History {
   ) {}
 
   /** Record the state *before* an edit. */
-  record(before: Snapshot, kind: string) {
+  record(before: S, kind: string) {
     const t = this.now();
     const last = this.undoStack[this.undoStack.length - 1];
     const groupable = kind === "type" || kind === "delete";
     if (!(groupable && last && last.kind === kind && t - last.at < this.groupMs)) {
-      this.undoStack.push({ ...before, kind, at: t });
+      this.undoStack.push({ state: before, kind, at: t });
       if (this.undoStack.length > this.limit) this.undoStack.shift();
     } else {
       last.at = t;
@@ -52,17 +53,17 @@ export class History {
     return this.redoStack.length > 0;
   }
 
-  undo(current: Snapshot): Snapshot | null {
+  undo(current: S): S | null {
     const e = this.undoStack.pop();
     if (!e) return null;
     this.redoStack.push(current);
-    return { blocks: e.blocks, selection: e.selection };
+    return e.state;
   }
 
-  redo(current: Snapshot): Snapshot | null {
+  redo(current: S): S | null {
     const s = this.redoStack.pop();
-    if (!s) return null;
-    this.undoStack.push({ ...current, kind: "redo", at: this.now() });
+    if (s === undefined) return null;
+    this.undoStack.push({ state: current, kind: "redo", at: this.now() });
     return s;
   }
 }

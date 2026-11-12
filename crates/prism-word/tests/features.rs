@@ -428,6 +428,12 @@ fn blank_document_gains_parts_on_demand() {
         title: "T".into(),
         ..Default::default()
     });
+    doc.headers.push(HeaderFooter {
+        kind: HeaderKind::Footer,
+        which: "default".into(),
+        rel_id: String::new(),
+        blocks: vec![Block::Paragraph(Paragraph::plain("Page footer"))],
+    });
     write_package(&mut pkg, &doc).unwrap();
     assert!(pkg.validate().is_empty(), "{:#?}", pkg.validate());
     let back = read_package(&pkg).unwrap();
@@ -435,4 +441,14 @@ fn blank_document_gains_parts_on_demand() {
     assert_eq!(back.comments.len(), 1);
     assert!(back.settings.track_revisions);
     assert_eq!(back.sources.len(), 1);
+    assert_eq!(back.headers.len(), 1);
+    assert_eq!(back.headers[0].kind, HeaderKind::Footer);
+    assert_eq!(
+        WordDocument {
+            blocks: back.headers[0].blocks.clone(),
+            ..Default::default()
+        }
+        .plain_text(),
+        "Page footer"
+    );
 }

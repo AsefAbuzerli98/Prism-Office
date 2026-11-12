@@ -821,6 +821,76 @@ fn write_sources(pkg: &mut Package, main: &PartName, doc: &WordDocument) -> Resu
     Ok(())
 }
 
+const HEADER_REL: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header";
+const FOOTER_REL: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer";
+
+/// Create parts, relationships and `sectPr` references for headers/footers
+/// added in the editor (empty or unknown `rel_id`). Returns the updated model.
+pub(crate) fn prepare_new_headers(
+    pkg: &mut Package,
+    main: &PartName,
+    doc: &WordDocument,
+) -> Result<WordDocument> {
+    let mut doc = doc.clone();
+    let mut rels = pkg.relationships(Some(main))?;
+    let mut changed = false;
+    for hf in &mut doc.headers {
+        if !hf.rel_id.is_empty() && rels.by_id(&hf.rel_id).is_some() {
+            continue;
+        }
+        let (stem, root, rel_type, ct) = match hf.kind {
+            HeaderKind::Header => (
+                "header",
+                "hdr",
+                HEADER_REL,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml",
+            ),
+            HeaderKind::Footer => (
+                "footer",
+                "ftr",
+                FOOTER_REL,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml",
+            ),
+        };
+        let mut n = 1;
+        let file = loop {
+            let f = format!("{stem}{n}.xml");
+            if !pkg.has_part(&PartName::new(&format!("/word/{f}"))?) {
+                break f;
+            }
+            n += 1;
+        };
+        let part = PartName::new(&format!("/word/{file}"))?;
+        pkg.set_part(
+            part,
+            format!(r#"{DECL}<w:{root} xmlns:w="{W_NS}" xmlns:r="{R}"><w:p/></w:{root}>"#)
+                .into_bytes(),
+            Some(ct),
+        );
+        hf.rel_id = rels.add(rel_type, &file, TargetMode::Internal);
+        let tag = if hf.kind == HeaderKind::Header {
+            "headerReference"
+        } else {
+            "footerReference"
+        };
+        doc.section.extra.push(RawXml {
+            name: format!("w:{tag}"),
+            xml: format!(
+                r#"<w:{tag} w:type="{}" r:id="{}"/>"#,
+                escape_attr(&hf.which),
+                escape_attr(&hf.rel_id)
+            ),
+        });
+        changed = true;
+    }
+    if changed {
+        pkg.set_relationships(Some(main), &rels);
+    }
+    Ok(doc)
+}
+
 pub(crate) fn write_parts(pkg: &mut Package, main: &PartName, doc: &WordDocument) -> Result<()> {
     write_notes(pkg, main, doc, NoteKind::Footnote)?;
     write_notes(pkg, main, doc, NoteKind::Endnote)?;
