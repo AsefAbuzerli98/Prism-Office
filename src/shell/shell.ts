@@ -12,6 +12,9 @@ import { WordEditor, type EngineView } from "../word/editor";
 import { SheetEditor } from "../sheet/editor";
 import { SlideEditor } from "../slide/editor";
 import { allPresetNames } from "../slide/engine";
+import { SlideShow } from "../slide/show";
+import { ANIMATION_PRESETS } from "../slide/anim";
+import { TRANSITIONS } from "../slide/transition";
 import type { AsyncRequest } from "../sheet/engine";
 import { jsonToRows, parseCsv } from "../sheet/data";
 import { openPivotDialog } from "../sheet/pivot-dialog";
@@ -322,7 +325,32 @@ export class Shell {
       simple("ppt.table", "insertTable", "3x3"),
       simple("ppt.slideSize", "slideSize"),
       simple("ppt.background", "background"),
+      simple("ppt.transition", "transition", "fade"),
+      { ...simple("ppt.morph", "transition", "morph"), hidden: false },
+      simple("ppt.fade", "transition", "fade"),
+      sel("ppt.animate", "animate"),
+      { ...simple("ppt.timeline", "timeline"), hidden: false },
+      { ...simple("ppt.showStart", "show", "start"), hidden: false, keys: ["F5"], run: () => this.startShow(0) },
+      { ...simple("ppt.showCurrent", "show", "current"), hidden: false, keys: ["Shift+F5"], run: () => this.startShow(ed()?.current ?? 0) },
+      { ...simple("ppt.presenter", "show", "presenter"), hidden: false, keys: ["Alt+F5"], run: () => this.startShow(ed()?.current ?? 0, true) },
     );
+  }
+
+  /** Run the slideshow of the active presentation (presenter view optional). */
+  startShow(start: number, presenter = false) {
+    const ed = this.activeSlides;
+    if (!ed?.model) return;
+    ed.commitEdit();
+    const show = new SlideShow(ed.model, {
+      start,
+      presenter,
+      images: (p) => ed.imageSource(p),
+      onExit: (i) => {
+        ed.goTo(i);
+        ed.focus();
+      },
+    });
+    void show.start();
   }
 
   private registerSheetCommands() {
@@ -692,6 +720,18 @@ export class Shell {
         const rest = names.filter((n) => !common.includes(n));
         return pick([...common.filter((n) => n === "line" || n === "straightConnector1" || names.includes(n)), ...rest].map((n) => ({ value: n, label: n === "straightConnector1" ? "arrow" : n })), (v) => sl.execute("insertShape", v), title);
       }
+      case "ppt.transition":
+        return pick(
+          [...TRANSITIONS.map((x) => ({ value: x.kind, label: t(`slide.tr.${x.kind}`, {}, x.label), selected: (sl.slide?.transition?.kind ?? "none") === x.kind })), { value: `${sl.slide?.transition?.kind ?? "fade"}:all`, label: t("slide.applyAll", {}, "Apply to all slides") }],
+          (v) => sl.execute("transition", v),
+          title,
+        );
+      case "ppt.animate":
+        return pick(
+          [...ANIMATION_PRESETS.map((a) => ({ value: `${a.class}:${a.preset}${a.subtype !== undefined ? `:${a.subtype}` : ""}`, label: `${a.class === "entr" ? "↗" : a.class === "exit" ? "↘" : "✦"} ${t(`slide.fx.${a.class}.${a.preset}`, {}, a.label)}` })), { value: "clear", label: t("slide.clearAnimations", {}, "Remove animations") }],
+          (v) => (v === "clear" ? sl.execute("clearAnimations") : sl.execute("animate", v)),
+          title,
+        );
       case "ppt.table":
         return pick(["2x2", "3x3", "4x4", "3x5", "5x3", "6x4"].map((v) => ({ value: v, label: v.replace("x", " × ") })), (v) => sl.execute("insertTable", v), title);
       case "ppt.slideSize":
@@ -740,6 +780,9 @@ export class Shell {
         case "ppt.alignRight": return st.align === "r";
         case "ppt.justify": return st.align === "just";
         case "ppt.hideSlide": return st.hidden;
+        case "ppt.timeline": return sl.timelineOpen;
+        case "ppt.morph": return sl.slide?.transition?.kind === "morph";
+        case "ppt.fade": return sl.slide?.transition?.kind === "fade";
         default: return false;
       }
     }
@@ -1000,6 +1043,7 @@ export class Shell {
             if (this.tabs.active?.docId === docId && !this.showHub) this.renderRibbon(this.tabs.active);
           },
           onError: (msg) => this.flash(msg, true),
+          onShow: (i) => this.startShow(i),
         });
         engine.ready.then(
           () => engine.focus(),

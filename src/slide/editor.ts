@@ -7,6 +7,7 @@
 import { h } from "../core/dom";
 import type { HostBridge } from "../core/host";
 import type { EngineView } from "../word/editor";
+import { createBackend, PageCache, type Backend } from "../word/compositor";
 import { evaluate, loadDrawingml } from "./engine";
 import type { Paragraph, PresentationModel, RunProps, Slide, SlideNode, TextBody, Xfrm } from "./model";
 import {
@@ -27,6 +28,8 @@ import {
   zOrder,
 } from "./ops";
 import { drawSlide, paletteFor, renderSlideToCanvas, type RenderOptions } from "./render";
+import { ANIMATION_PRESETS, presetId } from "./anim";
+import { TRANSITIONS } from "./transition";
 import { effectivePara, resolveShape, slideContext } from "./resolve";
 import { readEditable, renderEditable, setBlockProps, type EditEnv } from "./textedit";
 import { EMU_PER_PT, fitScale, type TextEnv } from "./text";
@@ -91,7 +94,20 @@ export class SlideEditor implements EngineView {
   private rail: HTMLElement;
   private railList: HTMLElement;
   private stage: HTMLElement;
+  /** Composited slide raster (WebGPU/WebGL2/Canvas 2D backend). */
   private canvas: HTMLCanvasElement;
+  /** Selection chrome on top (or everything, without a backend). */
+  private overlayCanvas: HTMLCanvasElement;
+  private backend: Backend | null = null;
+  private readonly raster = new PageCache((w, hh) => {
+    if (typeof OffscreenCanvas !== "undefined") return new OffscreenCanvas(w, hh);
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = hh;
+    return c;
+  });
+  /** Bumped whenever the slide raster must be redrawn. */
+  private version = 0;
   private scroll: HTMLElement;
   private spacer: HTMLElement;
   private notes: HTMLTextAreaElement;
@@ -110,6 +126,9 @@ export class SlideEditor implements EngineView {
   private drawQueued = false;
   private resizeObs: ResizeObserver | null = null;
   private disposed = false;
+  /** Animation timeline panel. */
+  timelineOpen = false;
+  private timeline: HTMLElement | null = null;
   /** Insert tool waiting for a drag on the stage. */
   private pendingInsert: ((x: Xfrm) => SlideNode) | null = null;
   /** Caret/selection inside the text overlay when focus moved to the ribbon. */
@@ -128,9 +147,10 @@ export class SlideEditor implements EngineView {
       h("button", { class: "slide-rail-add", title: "New slide (Ctrl+M)", onclick: () => this.execute("newSlide") }, "＋ New slide"),
     );
     this.canvas = h("canvas", { class: "slide-canvas", "aria-hidden": "true" });
+    this.overlayCanvas = h("canvas", { class: "slide-canvas", "aria-hidden": "true" });
     this.spacer = h("div", { class: "slide-spacer" });
     this.scroll = h("div", { class: "slide-scroll", tabindex: "0", role: "application", "aria-label": "Slide editor" }, this.spacer);
-    this.stage = h("div", { class: "slide-stage" }, this.canvas, this.scroll);
+    this.stage = h("div", { class: "slide-stage" }, this.canvas, this.overlayCanvas, this.scroll);
     this.notes = h("textarea", { class: "slide-notes", placeholder: "Click to add notes", "aria-label": "Speaker notes", spellcheck: "true" });
     this.status = h("div", { class: "slide-status", "aria-live": "polite" });
     this.el = h(
@@ -141,7 +161,40 @@ export class SlideEditor implements EngineView {
       this.status,
     );
     this.wire();
+    const pref = (globalThis.localStorage?.getItem("prism.compositor") ?? "auto") as "auto" | "webgpu" | "webgl2" | "canvas2d";
+    void createBackend(this.canvas, pref)
+      .then((b) => {
+        this.backend = b;
+        this.el.dataset.compositor = b?.kind ?? "none";
+        this.queueDraw();
+      })
+      .catch(() => {});
     this.ready = this.load();
+  }
+
+  /** Which compositor backend is active (diagnostics/tests). */
+  get compositor(): string {
+    return this.backend?.kind ?? "none";
+  }
+
+  /** A backend failed at runtime: fall back to the next one. */
+  private downgradeCompositor(err: unknown) {
+    const order = ["webgpu", "webgl2", "canvas2d"] as const;
+    const failed = this.backend?.kind ?? "canvas2d";
+    const next = order[order.indexOf(failed) + 1];
+    console.warn(`Compositor ${failed} failed, falling back`, err);
+    this.backend?.dispose();
+    this.backend = null;
+    const fresh = h("canvas", { class: "slide-canvas", "aria-hidden": "true" });
+    this.canvas.replaceWith(fresh);
+    this.canvas = fresh;
+    if (!next) return this.queueDraw();
+    void createBackend(fresh, next).then((b) => {
+      this.backend = b;
+      this.el.dataset.compositor = b?.kind ?? "none";
+      this.version++;
+      this.queueDraw();
+    });
   }
 
   // ---- lifecycle ---------------------------------------------------------------------------
@@ -191,6 +244,7 @@ export class SlideEditor implements EngineView {
   }
 
   private changed(allThumbs = false) {
+    this.version++;
     this.opts.onDirty?.();
     if (allThumbs) this.model?.slides.forEach((_, i) => this.thumbDirty.add(i));
     else this.thumbDirty.add(this.current);
@@ -205,13 +259,13 @@ export class SlideEditor implements EngineView {
 
   private restore(snap: string) {
     const { m, c } = JSON.parse(snap) as { m: PresentationModel; c: number };
-    const structural = m.slides.length !== this.model?.slides.length;
     this.model = m;
     this.current = Math.min(c, m.slides.length - 1);
     this.selection.clear();
-    if (structural) this.rebuildRail();
+    this.rebuildRail();
     this.syncNotes();
     this.changed(true);
+    this.renderTimeline();
   }
 
   undo() {
@@ -392,33 +446,59 @@ export class SlideEditor implements EngineView {
     const vw = this.scroll.clientWidth;
     const vh = this.scroll.clientHeight;
     if (!vw || !vh) return;
-    if (this.canvas.width !== Math.round(vw * dpr) || this.canvas.height !== Math.round(vh * dpr)) {
-      this.canvas.width = Math.round(vw * dpr);
-      this.canvas.height = Math.round(vh * dpr);
-      this.canvas.style.width = `${vw}px`;
-      this.canvas.style.height = `${vh}px`;
-    }
-    const ctx = this.canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "#e7e5e4";
-    ctx.fillRect(0, 0, vw, vh);
     const W = pt(m.width) * v.k;
     const H = pt(m.height) * v.k;
-    ctx.fillStyle = "rgba(0,0,0,.18)";
-    ctx.fillRect(v.ox + 2, v.oy + 3, W, H);
-    if (s) {
-      ctx.save();
-      ctx.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.ox, dpr * v.oy);
+    const overlay = this.overlayCanvas;
+    if (overlay.width !== Math.round(vw * dpr) || overlay.height !== Math.round(vh * dpr)) {
+      overlay.width = Math.round(vw * dpr);
+      overlay.height = Math.round(vh * dpr);
+    }
+    for (const c of [this.canvas, overlay]) {
+      c.style.width = `${vw}px`;
+      c.style.height = `${vh}px`;
+    }
+    const octx = overlay.getContext("2d");
+    if (!octx) return;
+    octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    octx.clearRect(0, 0, vw, vh);
+    const paintSlide = (ctx: CanvasRenderingContext2D) => {
+      if (!s) return;
       try {
         drawSlide(ctx, m, s, this.renderOpts());
       } catch (e) {
         this.opts.onError?.(String(e));
       }
-      ctx.restore();
+    };
+    let composited = false;
+    if (this.backend) {
+      if (this.canvas.width !== Math.round(vw * dpr) || this.canvas.height !== Math.round(vh * dpr)) this.backend.resize(vw, vh, dpr);
+      // keep rasters within GPU texture limits at extreme zoom
+      const scale = Math.min(v.k * dpr, 8192 / pt(m.width), 8192 / pt(m.height));
+      const source = this.raster.get(this.current, this.version, scale, pt(m.width), pt(m.height), paintSlide);
+      try {
+        this.backend.draw([{ key: `s${this.current}`, version: this.version * 1000 + Math.round(scale * 100), source, x: v.ox, y: v.oy, w: W, h: H }], [0.906, 0.898, 0.894]);
+        composited = true;
+      } catch (err) {
+        this.downgradeCompositor(err);
+      }
     }
-    this.drawChrome(ctx);
-    this.status.textContent = `Slide ${this.current + 1} of ${m.slides.length}  ·  ${Math.round(v.k * (96 / 72) * 100 * (72 / 96))}%`;
+    if (composited) {
+      // drop shadow outside the slide (the slide itself is on the GPU layer)
+      octx.fillStyle = "rgba(0,0,0,.18)";
+      octx.fillRect(v.ox + W, v.oy + 3, 2, H);
+      octx.fillRect(v.ox + 2, v.oy + H, W, 3);
+    } else {
+      octx.fillStyle = "#e7e5e4";
+      octx.fillRect(0, 0, vw, vh);
+      octx.fillStyle = "rgba(0,0,0,.18)";
+      octx.fillRect(v.ox + 2, v.oy + 3, W, H);
+      octx.save();
+      octx.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.ox, dpr * v.oy);
+      paintSlide(octx);
+      octx.restore();
+    }
+    this.drawChrome(octx);
+    this.status.textContent = `Slide ${this.current + 1} of ${m.slides.length}  ·  ${Math.round(v.k * 100)}%`;
   }
 
   /** Selection boxes, handles, guides, marquee (stage px). */
@@ -507,6 +587,7 @@ export class SlideEditor implements EngineView {
             if (JSON.stringify(s.shapes).includes(part) || JSON.stringify(s.background ?? {}).includes(part)) this.thumbDirty.add(i);
           });
           if (JSON.stringify(this.model?.masters ?? []).includes(part)) this.model?.slides.forEach((_, i) => this.thumbDirty.add(i));
+          this.version++;
           this.queueDraw();
         };
         img.src = `data:${d.mime};base64,${d.data}`;
@@ -514,6 +595,81 @@ export class SlideEditor implements EngineView {
       })
       .catch(() => {});
     return null;
+  }
+
+  // ---- animation timeline ------------------------------------------------------------------------
+
+  /** Side panel listing the slide's effects: order, trigger, duration, delay, remove. */
+  renderTimeline() {
+    if (!this.timelineOpen) {
+      this.timeline?.remove();
+      this.timeline = null;
+      return;
+    }
+    if (!this.timeline) {
+      this.timeline = h("aside", { class: "slide-timeline", "aria-label": "Animation timeline" });
+      this.stage.append(this.timeline);
+    }
+    const s = this.slide;
+    const effects = s?.timing?.effects ?? [];
+    const nameOf = (id: number) => s?.shapes.find((n) => n.id === id)?.name ?? `#${id}`;
+    const edit = (f: () => void) => {
+      if (!s?.timing) return;
+      this.begin();
+      f();
+      this.changed();
+      this.renderTimeline();
+    };
+    let click = 0;
+    const rows = effects.map((e, i) => {
+      if (e.trigger === "onClick") click++;
+      const icon = { entr: "↗", exit: "↘", emph: "✦", path: "∿" }[e.class] ?? "•";
+      return h(
+        "li",
+        { class: `tl-row tl-${e.class}${this.selection.has(e.shape) ? " sel" : ""}` },
+        h("span", { class: "tl-num" }, e.trigger === "onClick" ? String(click) : ""),
+        h("span", { class: "tl-icon", title: e.class }, icon),
+        h("span", { class: "tl-name", title: `${e.preset} — ${nameOf(e.shape)}`, onclick: () => (this.selection.clear(), this.selection.add(e.shape), this.queueDraw(), this.renderTimeline()) }, `${e.preset} · ${nameOf(e.shape)}`),
+        h(
+          "select",
+          { class: "tl-trigger", "aria-label": "Start", onchange: (ev: Event) => edit(() => (e.trigger = (ev.target as HTMLSelectElement).value)) },
+          ...[
+            ["onClick", "On click"],
+            ["withPrev", "With previous"],
+            ["afterPrev", "After previous"],
+          ].map(([v, l]) => h("option", { value: v!, selected: e.trigger === v }, l!)),
+        ),
+        h("input", { class: "tl-num-input tl-dur", type: "number", min: "0", step: "0.1", value: String(e.duration / 1000), title: "Duration (s)", "aria-label": "Duration in seconds", onchange: (ev: Event) => edit(() => (e.duration = Math.max(1, Math.round(Number((ev.target as HTMLInputElement).value) * 1000)))) }),
+        h("input", { class: "tl-num-input tl-delay", type: "number", min: "0", step: "0.1", value: String((e.delay ?? 0) / 1000), title: "Delay (s)", "aria-label": "Delay in seconds", onchange: (ev: Event) => edit(() => (e.delay = Math.max(0, Math.round(Number((ev.target as HTMLInputElement).value) * 1000)))) }),
+        h("button", { class: "tl-btn", title: "Move up", disabled: i === 0, onclick: () => edit(() => effects.splice(i - 1, 0, ...effects.splice(i, 1))) }, "↑"),
+        h("button", { class: "tl-btn", title: "Move down", disabled: i === effects.length - 1, onclick: () => edit(() => effects.splice(i + 1, 0, ...effects.splice(i, 1))) }, "↓"),
+        h("button", { class: "tl-btn", title: "Remove", onclick: () => edit(() => {
+          effects.splice(i, 1);
+          if (!effects.length) delete s!.timing;
+        }) }, "✕"),
+      );
+    });
+    const tr = s?.transition;
+    this.timeline.replaceChildren(
+      h("div", { class: "tl-head" }, h("strong", {}, "Animations"), h("button", { class: "tl-btn", title: "Close", onclick: () => this.execute("timeline") }, "✕")),
+      effects.length ? h("ol", { class: "tl-list" }, ...rows) : h("p", { class: "tl-empty" }, "Select a shape and choose Add Animation."),
+      h(
+        "div",
+        { class: "tl-trans" },
+        h("strong", {}, "Transition: "),
+        tr ? `${tr.kind}${tr.dir ? ` (${tr.dir})` : ""}` : "none",
+        tr
+          ? h("label", {}, " · ", h("input", { class: "tl-num-input", type: "number", min: "0", step: "0.1", value: String((tr.duration ?? 700) / 1000), "aria-label": "Transition duration in seconds", onchange: (ev: Event) => this.execute("transitionDuration", (ev.target as HTMLInputElement).value) }), " s")
+          : "",
+        h("label", {}, " · auto after ", h("input", { class: "tl-num-input", type: "number", min: "0", step: "1", value: tr?.advanceAfter !== undefined ? String(tr.advanceAfter / 1000) : "", placeholder: "—", "aria-label": "Advance after seconds", onchange: (ev: Event) => this.execute("advanceAfter", (ev.target as HTMLInputElement).value) }), " s"),
+      ),
+      h("button", { class: "tl-play", onclick: () => this.execute("show", "current") }, "▶ Preview from this slide"),
+    );
+  }
+
+  /** Picture element for a part (slideshow shares the editor's image cache). */
+  imageSource(part: string): CanvasImageSource | null {
+    return this.image(part);
   }
 
   // ---- rail --------------------------------------------------------------------------------------
@@ -552,7 +708,7 @@ export class SlideEditor implements EngineView {
               if (Number.isFinite(from)) this.moveSlide(from, i);
             },
           },
-          h("span", { class: "slide-thumb-num" }, String(i + 1)),
+          h("span", { class: "slide-thumb-num" }, String(i + 1), s.transition || s.timing?.effects.length ? h("span", { class: "slide-thumb-fx", title: "Transition or animations" }, "★") : ""),
           this.thumbs[i]!,
         ),
       ),
@@ -588,11 +744,13 @@ export class SlideEditor implements EngineView {
     if (!m || !m.slides.length) return;
     this.commitEdit();
     this.current = Math.max(0, Math.min(i, m.slides.length - 1));
+    this.version++;
     this.selection.clear();
     this.syncNotes();
     this.queueDraw();
     this.updateThumbs();
     this.railList.children[this.current]?.scrollIntoView?.({ block: "nearest" });
+    this.renderTimeline();
     this.opts.onState?.();
   }
 
@@ -787,11 +945,13 @@ export class SlideEditor implements EngineView {
         n.xfrm.x = Math.round(o.x + dx);
         n.xfrm.y = Math.round(o.y + dy);
       }
+      this.version++;
       this.queueDraw();
     } else if (d.kind === "resize") {
       const n = s.shapes.find((x) => x.id === d.id);
       if (!n?.xfrm) return;
       n.xfrm = { ...n.xfrm, ...resizeXfrm(d.orig, d.handle, px - d.sx, py - d.sy, d.aspect !== e.shiftKey && d.handle % 2 === 0) };
+      this.version++;
       this.queueDraw();
     } else if (d.kind === "rotate") {
       const n = s.shapes.find((x) => x.id === d.id);
@@ -803,6 +963,7 @@ export class SlideEditor implements EngineView {
         if (Math.abs(r - deg) < 3) deg = r;
       }
       n.xfrm.rot = Math.round((((deg % 360) + 360) % 360) * 60000);
+      this.version++;
       this.queueDraw();
     } else {
       d.x = px;
@@ -1071,6 +1232,7 @@ export class SlideEditor implements EngineView {
       sel.addRange(r);
     }
     if (o.replaceWith !== undefined) this.syncEdit();
+    this.version++;
     this.queueDraw();
     this.opts.onState?.();
   }
@@ -1147,6 +1309,7 @@ export class SlideEditor implements EngineView {
     // an untouched session leaves no undo step
     const n = this.slide?.shapes.find((x) => x.id === ed.id);
     if (n && JSON.stringify(this.textOf(n, ed.cell) ?? null) === JSON.stringify(ed.orig ?? null)) this.undoStack.pop();
+    this.version++;
     this.queueDraw();
     this.opts.onState?.();
   }
@@ -1695,6 +1858,78 @@ export class SlideEditor implements EngineView {
       case "show":
         this.commitEdit();
         this.opts.onShow?.(arg === "current" ? this.current : 0);
+        return true;
+      case "transition": {
+        if (!s) return true;
+        const [kind, dir] = (arg ?? "fade").split(":");
+        const all = arg?.endsWith(":all");
+        this.begin();
+        for (const t of all ? m.slides : [s]) {
+          if (kind === "none") delete t.transition;
+          else {
+            const def = TRANSITIONS.find((x) => x.kind === kind);
+            t.transition = { ...(t.transition ?? {}), kind: kind!, dir: dir && dir !== "all" ? dir : def?.dir, duration: t.transition?.kind === kind ? t.transition?.duration : kind === "morph" ? 2000 : 700, advanceClick: t.transition?.advanceClick ?? true };
+            if (!t.transition.dir) delete t.transition.dir;
+          }
+        }
+        this.rebuildRail();
+        this.changed(!!all);
+        return true;
+      }
+      case "transitionDuration": {
+        if (!s?.transition) return true;
+        this.begin();
+        s.transition.duration = Math.max(0, Math.round(Number(arg) * 1000));
+        this.changed();
+        return true;
+      }
+      case "advanceAfter": {
+        if (!s) return true;
+        this.begin();
+        s.transition ??= { kind: "cut", advanceClick: true };
+        if (arg === "" || arg === undefined) delete s.transition.advanceAfter;
+        else s.transition.advanceAfter = Math.round(Number(arg) * 1000);
+        this.changed();
+        return true;
+      }
+      case "animate": {
+        if (!s || !this.selection.size) return true;
+        const [cls, preset, sub] = (arg ?? "entr:fade").split(":");
+        const def = ANIMATION_PRESETS.find((p) => p.class === cls && p.preset === preset);
+        this.begin();
+        s.timing ??= { effects: [] };
+        for (const n of this.selectedNodes()) {
+          s.timing.effects.push({
+            shape: n.id,
+            class: cls!,
+            preset: preset!,
+            presetId: presetId(cls!, preset!),
+            subtype: sub ? Number(sub) : (def?.subtype ?? 0),
+            trigger: "onClick",
+            delay: 0,
+            duration: cls === "emph" ? 1000 : preset === "appear" ? 1 : 500,
+          });
+        }
+        this.rebuildRail();
+        this.changed();
+        this.renderTimeline();
+        return true;
+      }
+      case "clearAnimations": {
+        if (!s?.timing) return true;
+        this.begin();
+        const ids = this.selection.size ? this.selection : new Set(s.shapes.map((n) => n.id));
+        s.timing.effects = s.timing.effects.filter((e) => !ids.has(e.shape));
+        if (!s.timing.effects.length) delete s.timing;
+        this.rebuildRail();
+        this.changed();
+        this.renderTimeline();
+        return true;
+      }
+      case "timeline":
+        this.timelineOpen = !this.timelineOpen;
+        this.renderTimeline();
+        this.queueDraw();
         return true;
       default:
         return false;

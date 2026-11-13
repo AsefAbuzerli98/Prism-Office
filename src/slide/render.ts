@@ -34,6 +34,8 @@ export interface RenderOptions {
   /** Shape ids whose text is not drawn (text being edited in an overlay). */
   skipText?: Set<number>;
   anim?: (id: number) => ShapeAnim | null;
+  /** Draw only the slide's own shapes: no background, master or layout art (Morph layer). */
+  shapesOnly?: boolean;
   /** Shrink overflowing normAutofit text (editor live autofit). */
   liveAutofit?: boolean;
 }
@@ -73,11 +75,13 @@ export function drawSlide(ctx: CanvasRenderingContext2D, model: PresentationMode
   ctx.beginPath();
   ctx.rect(0, 0, W, H);
   ctx.clip();
-  drawBackground(ctx, effectiveBackground(slide, sc), W, H, env);
-  if (sc.layout.showMasterShapes !== false) {
-    for (const n of sc.master.shapes) if (!n.ph) drawNode(ctx, n, { ...env, level: "master" });
+  if (!opts.shapesOnly) {
+    drawBackground(ctx, effectiveBackground(slide, sc), W, H, env);
+    if (sc.layout.showMasterShapes !== false) {
+      for (const n of sc.master.shapes) if (!n.ph) drawNode(ctx, n, { ...env, level: "master" });
+    }
+    for (const n of sc.layout.shapes) if (!n.ph) drawNode(ctx, n, { ...env, level: "layout" });
   }
-  for (const n of sc.layout.shapes) if (!n.ph) drawNode(ctx, n, { ...env, level: "layout" });
   for (const n of slide.shapes) drawNode(ctx, n, env);
   ctx.restore();
 }
