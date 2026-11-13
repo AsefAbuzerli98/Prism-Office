@@ -31,6 +31,7 @@ import { drawSlide, paletteFor, renderSlideToCanvas, type RenderOptions } from "
 import { ANIMATION_PRESETS, presetId } from "./anim";
 import { TRANSITIONS } from "./transition";
 import { decodeXml, parseChartXml, type SlideChart } from "./chart";
+import { camera, isCameo } from "./camera";
 import { effectivePara, resolveShape, slideContext } from "./resolve";
 import { readEditable, renderEditable, setBlockProps, type EditEnv } from "./textedit";
 import { EMU_PER_PT, fitScale, type TextEnv } from "./text";
@@ -127,6 +128,8 @@ export class SlideEditor implements EngineView {
   private drawQueued = false;
   private resizeObs: ResizeObserver | null = null;
   private disposed = false;
+  private offCamera: () => void = () => {};
+  private cameoRaf = 0;
   /** Animation timeline panel. */
   timelineOpen = false;
   private timeline: HTMLElement | null = null;
@@ -162,6 +165,7 @@ export class SlideEditor implements EngineView {
       this.status,
     );
     this.wire();
+    this.offCamera = camera.onChange(() => this.cameoLoop());
     const pref = (globalThis.localStorage?.getItem("prism.compositor") ?? "auto") as "auto" | "webgpu" | "webgl2" | "canvas2d";
     void createBackend(this.canvas, pref)
       .then((b) => {
@@ -226,6 +230,7 @@ export class SlideEditor implements EngineView {
 
   dispose() {
     this.disposed = true;
+    this.offCamera();
     this.resizeObs?.disconnect();
     if (this.pushTimer) clearTimeout(this.pushTimer);
   }
@@ -449,6 +454,7 @@ export class SlideEditor implements EngineView {
     return {
       images: (p) => this.image(p),
       charts: (p) => this.chartSource(p),
+      camera: () => camera.frame(),
       editing: true,
       liveAutofit: true,
       slideNumber: this.current + 1,
@@ -688,6 +694,22 @@ export class SlideEditor implements EngineView {
     );
   }
 
+  /** Redraw continuously while a live Cameo is on the current slide. */
+  private cameoLoop() {
+    cancelAnimationFrame(this.cameoRaf);
+    let last = 0;
+    const tick = (now: number) => {
+      if (this.disposed || !camera.active || !this.slide?.shapes.some((n) => isCameo(n))) return;
+      if (now - last > 33) {
+        last = now;
+        this.version++;
+        this.draw();
+      }
+      this.cameoRaf = requestAnimationFrame(tick);
+    };
+    if (typeof requestAnimationFrame !== "undefined") this.cameoRaf = requestAnimationFrame(tick);
+  }
+
   /** Picture element for a part (slideshow shares the editor's image cache). */
   imageSource(part: string): CanvasImageSource | null {
     return this.image(part);
@@ -772,6 +794,7 @@ export class SlideEditor implements EngineView {
     this.updateThumbs();
     this.railList.children[this.current]?.scrollIntoView?.({ block: "nearest" });
     this.renderTimeline();
+    this.cameoLoop();
     this.opts.onState?.();
   }
 
@@ -1947,6 +1970,44 @@ export class SlideEditor implements EngineView {
         this.renderTimeline();
         return true;
       }
+      case "insertCameo": {
+        if (!s) return true;
+        const size = Math.round(m.height * 0.36);
+        const n = newShape(s, "ellipse", { x: m.width - size - Math.round(m.width * 0.04), y: m.height - size - Math.round(m.height * 0.06), cx: size, cy: size }) as Extract<SlideNode, { type: "shape" }>;
+        n.name = `Cameo ${n.id - 1}`;
+        n.fill = { t: "solid", color: { base: { t: "srgb", v: "1F2937" } } };
+        n.line = { width: 38100, fill: { t: "solid", color: { base: { t: "scheme", v: "bg1" } } } };
+        n.effects = { shadow: { inner: false, blur: 152400, dist: 38100, dir: 5400000, color: { base: { t: "srgb", v: "000000" }, mods: [{ name: "alpha", val: 40000 }] } } };
+        delete n.text;
+        n.prism = { cameo: { mirror: true } };
+        this.insertNode(n);
+        void camera.start().catch((e) => this.opts.onError?.(`Camera: ${e instanceof Error ? e.message : String(e)}`));
+        return true;
+      }
+      case "cameoShape": {
+        const cams = this.selectedNodes().filter((n) => isCameo(n)) as Extract<SlideNode, { type: "shape" }>[];
+        const targets = cams.length ? cams : ((s?.shapes.filter((n) => isCameo(n)) ?? []) as Extract<SlideNode, { type: "shape" }>[]);
+        if (!targets.length) return true;
+        this.begin();
+        for (const n of targets) n.geom = { t: "preset", name: arg ?? "ellipse" };
+        this.changed();
+        return true;
+      }
+      case "cameoMirror": {
+        const cams = (s?.shapes.filter((n) => isCameo(n) && (!this.selection.size || this.selection.has(n.id))) ?? []) as Extract<SlideNode, { type: "shape" }>[];
+        if (!cams.length) return true;
+        this.begin();
+        for (const n of cams) {
+          const c = (n.prism as { cameo: { mirror?: boolean } }).cameo;
+          c.mirror = c.mirror === false;
+        }
+        this.changed();
+        return true;
+      }
+      case "cameraToggle":
+        if (camera.active) camera.stop();
+        else void camera.start(arg || undefined).catch((e) => this.opts.onError?.(`Camera: ${e instanceof Error ? e.message : String(e)}`));
+        return true;
       case "timeline":
         this.timelineOpen = !this.timelineOpen;
         this.renderTimeline();

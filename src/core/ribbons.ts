@@ -402,6 +402,8 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
           commands: [
             cmd("ppt.cameo", "Insert Cameo", "◉", 4),
             cmd("ppt.cameoShape", "Frame Shape", "⬭", 4),
+            cmd("ppt.cameoMirror", "Mirror", "⇋", 4),
+            cmd("ppt.camera", "Camera", "📷", 4),
           ],
         },
       ],

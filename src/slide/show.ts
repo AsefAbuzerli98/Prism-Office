@@ -11,6 +11,7 @@ import type { PresentationModel, Slide, SlideNode } from "./model";
 import { drawSlide, renderSlideToCanvas, type RenderOptions, type ShapeAnim } from "./render";
 import { resolveShape, slideContext } from "./resolve";
 import { EMU_PER_PT } from "./text";
+import { camera, isCameo } from "./camera";
 import { drawMorph, drawTransition, transitionDuration, type Raster } from "./transition";
 
 export interface ShowOptions {
@@ -109,6 +110,7 @@ export class SlideShow {
     document.addEventListener("keydown", this.onKeyBound, true);
     window.addEventListener("resize", this.onResizeBound);
     this.el.focus();
+    if (this.model.slides.some((sl) => sl.shapes.some((n) => isCameo(n)))) void camera.start().then(() => this.loop()).catch(() => {});
     if (this.opts.presenter) await this.openAudience();
     else if (this.opts.fullscreen !== false && this.el.requestFullscreen) {
       await this.el.requestFullscreen().catch(() => {});
@@ -328,7 +330,7 @@ export class SlideShow {
   // ---- drawing ---------------------------------------------------------------------------------------
 
   private renderOpts(index: number, anim?: Map<number, ShapeAnim>): RenderOptions {
-    return { images: this.opts.images, charts: this.opts.charts, slideNumber: index + 1, anim: anim ? (id) => anim.get(id) ?? null : undefined };
+    return { images: this.opts.images, charts: this.opts.charts, camera: () => camera.frame(), slideNumber: index + 1, anim: anim ? (id) => anim.get(id) ?? null : undefined };
   }
 
   /** Raster of a slide in a given build state at the main canvas resolution. */
@@ -358,9 +360,14 @@ export class SlideShow {
         }
       }
       this.draw();
-      if (this.trans || this.anim) this.raf = requestAnimationFrame(tick);
+      if (this.trans || this.anim || this.liveCameo()) this.raf = requestAnimationFrame(tick);
     };
     this.raf = requestAnimationFrame(tick);
+  }
+
+  /** A live camera feeds a Cameo on the current slide (keep repainting). */
+  private liveCameo(): boolean {
+    return camera.active && !!this.slide?.shapes.some((n) => isCameo(n));
   }
 
   /** Paint the show into a canvas (letterboxed). */

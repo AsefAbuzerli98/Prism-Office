@@ -9,6 +9,7 @@ import { effectiveBackground, hasText, placeholderPrompt, resolveShape, slideCon
 import { drawTextLayout, EMU_PER_PT, fitScale, layoutText, type TextEnv } from "./text";
 import { drawChart } from "../sheet/charts";
 import type { SlideChart } from "./chart";
+import { cameoOptions, isCameo } from "./camera";
 
 export { EMU_PER_PT };
 
@@ -28,6 +29,8 @@ export interface ShapeAnim {
 
 export interface RenderOptions {
   images?: (part: string) => CanvasImageSource | null;
+  /** Live camera frame for Cameo objects (null: draw the placeholder). */
+  camera?: () => CanvasImageSource | null;
   /** Parsed chart parts (by part name) for chart frames. */
   charts?: (part: string) => SlideChart | null;
   /** Show prompts/outlines of empty placeholders. */
@@ -441,6 +444,10 @@ function drawShape(ctx: CanvasRenderingContext2D, node: Extract<SlideNode, { typ
     line = { ...base, ...(line ?? {}), fill: line?.fill ?? base.fill ?? (node.style.line.color ? { t: "solid", color: node.style.line.color } : undefined) };
   }
   const eff = node.effects;
+  if (isCameo(node)) {
+    drawCameo(ctx, node, ev.paths[0]?.cmds ?? [], w, h, env);
+    fill = null;
+  }
   for (const p of ev.paths) {
     tracePath(ctx, p.cmds);
     if (fill && p.fill !== "none") {
@@ -521,6 +528,51 @@ function drawShapeText(ctx: CanvasRenderingContext2D, node: ShapeBody, res0: Res
   }
   const lay = layoutText(node.text, res, w, h, { ...tenv, extraScale: extra }, rect);
   drawTextLayout(ctx, lay);
+}
+
+/** Cameo: the live camera feed masked by the shape's geometry (cover-fit, mirrored). */
+function drawCameo(ctx: CanvasRenderingContext2D, node: ShapeBody, outline: Cmd[], w: number, h: number, env: Env) {
+  const frame = env.opts.camera?.() ?? null;
+  const o = cameoOptions(node);
+  ctx.save();
+  tracePath(ctx, outline);
+  applyShadow(ctx, node.effects, env, 1);
+  ctx.fillStyle = "#1f2937";
+  ctx.fill();
+  clearShadow(ctx);
+  ctx.clip();
+  if (frame) {
+    const vw = (frame as HTMLVideoElement).videoWidth || (frame as HTMLCanvasElement).width || 16;
+    const vh = (frame as HTMLVideoElement).videoHeight || (frame as HTMLCanvasElement).height || 9;
+    const s = Math.max(w / vw, h / vh) * o.zoom;
+    const dw = vw * s;
+    const dh = vh * s;
+    if (o.mirror) {
+      ctx.translate(w, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(frame, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  } else {
+    const g = ctx.createLinearGradient(0, 0, w, h);
+    g.addColorStop(0, "#374151");
+    g.addColorStop(1, "#111827");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    // camera glyph
+    const s = Math.min(w, h) * 0.22;
+    ctx.translate(w / 2, h / 2);
+    ctx.fillStyle = "rgba(255,255,255,.75)";
+    ctx.beginPath();
+    ctx.roundRect?.(-s, -s * 0.6, s * 1.4, s * 1.2, s * 0.2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(s * 0.5, -s * 0.25);
+    ctx.lineTo(s, -s * 0.55);
+    ctx.lineTo(s, s * 0.55);
+    ctx.lineTo(s * 0.5, s * 0.25);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 /** A list style with run fills removed (so a contextual default colour applies). */

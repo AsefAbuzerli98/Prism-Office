@@ -13,6 +13,7 @@ import { SheetEditor } from "../sheet/editor";
 import { SlideEditor } from "../slide/editor";
 import { allPresetNames } from "../slide/engine";
 import { SlideShow } from "../slide/show";
+import { camera } from "../slide/camera";
 import { ANIMATION_PRESETS } from "../slide/anim";
 import { TRANSITIONS } from "../slide/transition";
 import type { AsyncRequest } from "../sheet/engine";
@@ -329,6 +330,10 @@ export class Shell {
       { ...simple("ppt.morph", "transition", "morph"), hidden: false },
       simple("ppt.fade", "transition", "fade"),
       sel("ppt.animate", "animate"),
+      { ...simple("ppt.cameo", "insertCameo"), hidden: false },
+      simple("ppt.cameoShape", "cameoShape"),
+      simple("ppt.cameoMirror", "cameoMirror"),
+      simple("ppt.camera", "cameraToggle"),
       { ...simple("ppt.timeline", "timeline"), hidden: false },
       { ...simple("ppt.showStart", "show", "start"), hidden: false, keys: ["F5"], run: () => this.startShow(0) },
       { ...simple("ppt.showCurrent", "show", "current"), hidden: false, keys: ["Shift+F5"], run: () => this.startShow(ed()?.current ?? 0) },
@@ -733,6 +738,26 @@ export class Shell {
           (v) => (v === "clear" ? sl.execute("clearAnimations") : sl.execute("animate", v)),
           title,
         );
+      case "ppt.cameoShape":
+        return pick(
+          ["ellipse", "roundRect", "rect", "hexagon", "octagon", "diamond", "star5", "heart", "cloud", "snip1Rect", "teardrop", "flowChartAlternateProcess"].map((n) => ({ value: n, label: n })),
+          (v) => sl.execute("cameoShape", v),
+          title,
+        );
+      case "ppt.camera":
+        void camera.devices().then((ds) => {
+          const cams = ds.filter((d) => d.kind === "videoinput");
+          openPicker(
+            anchor,
+            [{ value: camera.active ? "off" : "", label: camera.active ? t("slide.cameraOff", {}, "Turn camera off") : t("slide.cameraOn", {}, "Turn camera on") }, ...cams.map((d) => ({ value: d.id, label: d.label, selected: d.id === camera.deviceId }))],
+            (v) => {
+              if (v === "off") camera.stop();
+              else sl.execute("cameraToggle", v);
+            },
+            title,
+          );
+        });
+        return true;
       case "ppt.table":
         return pick(["2x2", "3x3", "4x4", "3x5", "5x3", "6x4"].map((v) => ({ value: v, label: v.replace("x", " × ") })), (v) => sl.execute("insertTable", v), title);
       case "ppt.slideSize":
@@ -784,6 +809,7 @@ export class Shell {
         case "ppt.timeline": return sl.timelineOpen;
         case "ppt.morph": return sl.slide?.transition?.kind === "morph";
         case "ppt.fade": return sl.slide?.transition?.kind === "fade";
+        case "ppt.camera": return camera.active;
         default: return false;
       }
     }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Merged into the app bundle's Info.plist by the Tauri bundler. -->
+  <key>NSCameraUsageDescription</key>
+  <string>Prism Office uses the camera for Cameo objects and the Recording Studio.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Prism Office uses the microphone for narration, Speaker Coach and live subtitles.</string>
+</dict>
+</plist>

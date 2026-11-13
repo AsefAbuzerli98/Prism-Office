@@ -341,6 +341,8 @@ const az: Messages = {
   "ribbon.cmd.ppt.export": "MP4 ixrac",
   "ribbon.cmd.ppt.coach": "Çıxış məşqçisi",
   "ribbon.tab.slideshow": "Slayd şousu",
+  "ribbon.cmd.ppt.cameoMirror": "Güzgü",
+  "ribbon.cmd.ppt.camera": "Kamera",
   "ribbon.group.drawing": "Rəsm",
   "ribbon.group.insert": "Əlavə et",
   "ribbon.group.customize": "Fərdiləşdir",
