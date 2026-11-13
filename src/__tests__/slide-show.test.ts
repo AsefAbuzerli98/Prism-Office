@@ -101,3 +101,14 @@ describe("transitions", () => {
     expect(document.querySelector(".slideshow")).toBeNull();
   });
 });
+
+describe("slide charts", () => {
+  it("reads cached chart values", async () => {
+    const { parseChartXml } = await import("../slide/chart");
+    const xml = `<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:plotArea><c:barChart><c:barDir val="bar"/>
+      <c:ser><c:tx><c:strRef><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>Sales</c:v></c:pt></c:strCache></c:strRef></c:tx>
+      <c:cat><c:strRef><c:strCache><c:ptCount val="2"/><c:pt idx="0"><c:v>Q1</c:v></c:pt><c:pt idx="1"><c:v>Q2</c:v></c:pt></c:strCache></c:strRef></c:cat>
+      <c:val><c:numRef><c:numCache><c:ptCount val="2"/><c:pt idx="1"><c:v>5</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>`;
+    expect(parseChartXml(xml)).toEqual({ kind: "bar", title: "Sales", data: { categories: ["Q1", "Q2"], series: [{ name: "Sales", values: [null, 5] }] } });
+  });
+});

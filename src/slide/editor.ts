@@ -30,6 +30,7 @@ import {
 import { drawSlide, paletteFor, renderSlideToCanvas, type RenderOptions } from "./render";
 import { ANIMATION_PRESETS, presetId } from "./anim";
 import { TRANSITIONS } from "./transition";
+import { decodeXml, parseChartXml, type SlideChart } from "./chart";
 import { effectivePara, resolveShape, slideContext } from "./resolve";
 import { readEditable, renderEditable, setBlockProps, type EditEnv } from "./textedit";
 import { EMU_PER_PT, fitScale, type TextEnv } from "./text";
@@ -425,9 +426,29 @@ export class SlideEditor implements EngineView {
     else setTimeout(run, 0);
   }
 
+  private charts = new Map<string, SlideChart | null>();
+
+  /** Parsed chart part (loaded from the host on first use). */
+  chartSource(part: string): SlideChart | null {
+    if (this.charts.has(part)) return this.charts.get(part)!;
+    this.charts.set(part, null);
+    void this.host
+      .getSlidePart(this.docId, part)
+      .then((d) => {
+        if (!d) return;
+        this.charts.set(part, parseChartXml(decodeXml(d.data)));
+        this.model?.slides.forEach((s, i) => JSON.stringify(s.shapes).includes(part) && this.thumbDirty.add(i));
+        this.version++;
+        this.queueDraw();
+      })
+      .catch(() => {});
+    return null;
+  }
+
   private renderOpts(): RenderOptions {
     return {
       images: (p) => this.image(p),
+      charts: (p) => this.chartSource(p),
       editing: true,
       liveAutofit: true,
       slideNumber: this.current + 1,
@@ -725,7 +746,7 @@ export class SlideEditor implements EngineView {
       const s = m.slides[i];
       if (!c || !s) continue;
       try {
-        renderSlideToCanvas(c, m, s, THUMB_W, Math.min(window.devicePixelRatio || 1, 2), { images: (p) => this.image(p), slideNumber: i + 1 });
+        renderSlideToCanvas(c, m, s, THUMB_W, Math.min(window.devicePixelRatio || 1, 2), { images: (p) => this.image(p), charts: (p) => this.chartSource(p), slideNumber: i + 1 });
       } catch {
         /* a broken shape must not break the rail */
       }

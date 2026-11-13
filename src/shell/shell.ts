@@ -345,6 +345,7 @@ export class Shell {
       start,
       presenter,
       images: (p) => ed.imageSource(p),
+      charts: (p) => ed.chartSource(p),
       onExit: (i) => {
         ed.goTo(i);
         ed.focus();

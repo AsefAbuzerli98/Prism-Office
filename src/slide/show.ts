@@ -16,6 +16,7 @@ import { drawMorph, drawTransition, transitionDuration, type Raster } from "./tr
 export interface ShowOptions {
   start?: number;
   images?: (part: string) => CanvasImageSource | null;
+  charts?: (part: string) => import("./chart").SlideChart | null;
   onExit?: (slide: number) => void;
   /** Presenter view in this window, audience view in a second window. */
   presenter?: boolean;
@@ -327,7 +328,7 @@ export class SlideShow {
   // ---- drawing ---------------------------------------------------------------------------------------
 
   private renderOpts(index: number, anim?: Map<number, ShapeAnim>): RenderOptions {
-    return { images: this.opts.images, slideNumber: index + 1, anim: anim ? (id) => anim.get(id) ?? null : undefined };
+    return { images: this.opts.images, charts: this.opts.charts, slideNumber: index + 1, anim: anim ? (id) => anim.get(id) ?? null : undefined };
   }
 
   /** Raster of a slide in a given build state at the main canvas resolution. */

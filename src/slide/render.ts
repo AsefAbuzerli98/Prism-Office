@@ -7,6 +7,8 @@ import { evaluate, Palette } from "./engine";
 import type { Background, Cmd, Effects, Fill, Line, ListStyle, ParaProps, PresentationModel, ShapeBody, Slide, SlideNode, Table, Xfrm } from "./model";
 import { effectiveBackground, hasText, placeholderPrompt, resolveShape, slideContext, type ResolvedShape, type SlideContext } from "./resolve";
 import { drawTextLayout, EMU_PER_PT, fitScale, layoutText, type TextEnv } from "./text";
+import { drawChart } from "../sheet/charts";
+import type { SlideChart } from "./chart";
 
 export { EMU_PER_PT };
 
@@ -26,6 +28,8 @@ export interface ShapeAnim {
 
 export interface RenderOptions {
   images?: (part: string) => CanvasImageSource | null;
+  /** Parsed chart parts (by part name) for chart frames. */
+  charts?: (part: string) => SlideChart | null;
   /** Show prompts/outlines of empty placeholders. */
   editing?: boolean;
   slideNumber?: number;
@@ -579,6 +583,11 @@ function drawFrame(ctx: CanvasRenderingContext2D, node: Extract<SlideNode, { typ
   const h = pt(x.cy);
   if (node.kind === "table" && node.table) {
     drawTable(ctx, node.table, env);
+    return;
+  }
+  const chart = node.kind === "chart" && node.relId ? env.opts.charts?.(node.relId) : null;
+  if (chart) {
+    drawChart(ctx, 0, 0, w, h, chart.kind, chart.title, chart.data);
     return;
   }
   ctx.fillStyle = "rgba(148,163,184,.12)";
