@@ -25,6 +25,10 @@ pub enum DocError {
     Sheet(#[from] prism_sheet::xlsx::XlsxError),
     #[error("document {0} is not a spreadsheet")]
     NotSheet(u64),
+    #[error(transparent)]
+    Slide(#[from] prism_slide::SlideError),
+    #[error("document {0} is not a presentation")]
+    NotSlides(u64),
     #[error("file extension `.{ext}` does not match a {kind:?}")]
     ExtensionMismatch { ext: String, kind: DocumentKind },
 }
@@ -62,6 +66,10 @@ struct OpenDocument {
         prism_sheet::xlsx::XlsxSource,
     )>,
     sheet_dirty: bool,
+    /// Presentation model and its source package (lossless save; pictures
+    /// added in the editor live in the source package until saved).
+    slides: Option<(prism_slide::PresentationModel, prism_slide::SlideSource)>,
+    slides_dirty: bool,
     /// Auto-recovery journal key, edit revision and last journaled revision.
     recovery_key: String,
     revision: u64,
@@ -73,6 +81,28 @@ pub struct DocumentRegistry {
     next_id: AtomicU64,
     docs: Mutex<HashMap<u64, OpenDocument>>,
     untitled: Mutex<HashMap<DocumentKind, u32>>,
+}
+
+/// Recovery journal of a presentation: the model plus pictures added since
+/// the file was opened (they exist only in the in-memory source package).
+fn slides_journal(
+    model: &prism_slide::PresentationModel,
+    src: &prism_slide::SlideSource,
+    saved: &Package,
+) -> serde_json::Value {
+    use base64::Engine;
+    let mut media = serde_json::Map::new();
+    for name in src.package.part_names() {
+        if name.as_str().starts_with("/ppt/media/") && !saved.has_part(name) {
+            if let Some(b) = src.package.part(name) {
+                media.insert(
+                    name.as_str().to_string(),
+                    base64::engine::general_purpose::STANDARD.encode(b).into(),
+                );
+            }
+        }
+    }
+    serde_json::json!({ "model": model, "media": media })
 }
 
 /// "Now" as an Excel serial in the computer's local time zone (TODAY/NOW
@@ -130,6 +160,8 @@ impl DocumentRegistry {
             word_dirty: false,
             sheet: None,
             sheet_dirty: false,
+            slides: None,
+            slides_dirty: false,
             recovery_key: String::new(),
             revision: 0,
             journaled: 0,
@@ -148,6 +180,8 @@ impl DocumentRegistry {
             word_dirty: false,
             sheet: None,
             sheet_dirty: false,
+            slides: None,
+            slides_dirty: false,
             recovery_key: String::new(),
             revision: 0,
             journaled: 0,
@@ -184,6 +218,14 @@ impl DocumentRegistry {
                 doc.package = prism_sheet::xlsx::write_package(m, Some(src), now_serial())?;
             }
             doc.sheet_dirty = false;
+        }
+        if doc.slides_dirty {
+            if let Some((m, src)) = &doc.slides {
+                doc.package = prism_slide::write_package(m, src)?;
+                // new slides/notes get part names; re-read for a fresh source
+                doc.slides = Some(prism_slide::read_package(doc.package.clone())?);
+            }
+            doc.slides_dirty = false;
         }
         doc.package.save(&target)?;
         doc.title = title_from_path(&target);
@@ -272,6 +314,55 @@ impl DocumentRegistry {
         Ok(())
     }
 
+    fn ensure_slides(doc: &mut OpenDocument, id: u64) -> Result<(), DocError> {
+        if doc.kind != DocumentKind::Presentation {
+            return Err(DocError::NotSlides(id));
+        }
+        if doc.slides.is_none() {
+            doc.slides = Some(prism_slide::read_package(doc.package.clone())?);
+        }
+        Ok(())
+    }
+
+    /// The presentation model (masters, layouts, slides).
+    pub fn slides(&self, id: u64) -> Result<prism_slide::PresentationModel, DocError> {
+        let mut docs = self.docs.lock().unwrap();
+        let doc = docs.get_mut(&id).ok_or(DocError::NotFound(id))?;
+        Self::ensure_slides(doc, id)?;
+        Ok(doc.slides.as_ref().unwrap().0.clone())
+    }
+
+    /// Replace the presentation model after an edit.
+    pub fn set_slides(
+        &self,
+        id: u64,
+        model: prism_slide::PresentationModel,
+    ) -> Result<(), DocError> {
+        let mut docs = self.docs.lock().unwrap();
+        let doc = docs.get_mut(&id).ok_or(DocError::NotFound(id))?;
+        Self::ensure_slides(doc, id)?;
+        doc.slides.as_mut().unwrap().0 = model;
+        doc.slides_dirty = true;
+        doc.revision += 1;
+        Ok(())
+    }
+
+    /// Bytes and content type of a presentation part (pictures, media).
+    pub fn slide_part(&self, id: u64, part: &str) -> Result<Option<(String, Vec<u8>)>, DocError> {
+        let mut docs = self.docs.lock().unwrap();
+        let doc = docs.get_mut(&id).ok_or(DocError::NotFound(id))?;
+        Self::ensure_slides(doc, id)?;
+        Ok(doc.slides.as_ref().unwrap().1.part_bytes(part))
+    }
+
+    /// Store a picture; returns its part name for `Fill::Image`.
+    pub fn add_slide_image(&self, id: u64, bytes: &[u8]) -> Result<String, DocError> {
+        let mut docs = self.docs.lock().unwrap();
+        let doc = docs.get_mut(&id).ok_or(DocError::NotFound(id))?;
+        Self::ensure_slides(doc, id)?;
+        Ok(doc.slides.as_mut().unwrap().1.add_image(bytes))
+    }
+
     /// Journal every document edited since the last tick (auto-recovery).
     pub fn journal_changes(&self, store: &crate::recovery::RecoveryStore) -> usize {
         let mut docs = self.docs.lock().unwrap();
@@ -280,9 +371,10 @@ impl DocumentRegistry {
             if doc.revision == doc.journaled {
                 continue;
             }
-            let content = match (&doc.word, &doc.sheet) {
-                (Some(w), _) => serde_json::to_value(w),
-                (None, Some((m, _))) => serde_json::to_value(m),
+            let content = match (&doc.word, &doc.sheet, &doc.slides) {
+                (Some(w), _, _) => serde_json::to_value(w),
+                (None, Some((m, _)), _) => serde_json::to_value(m),
+                (None, None, Some((m, src))) => Ok(slides_journal(m, src, &doc.package)),
                 _ => continue,
             };
             let Ok(content) = content else {
@@ -349,6 +441,40 @@ impl DocumentRegistry {
                     })
                 })?;
             self.set_sheet(info.id, model)?;
+        } else if meta.kind == DocumentKind::Presentation {
+            let model: prism_slide::PresentationModel =
+                serde_json::from_value(content["model"].clone()).map_err(|e| {
+                    DocError::OpenXml(prism_openxml::Error::Xml {
+                        part: "recovery".into(),
+                        message: e.to_string(),
+                    })
+                })?;
+            {
+                use base64::Engine;
+                let mut docs = self.docs.lock().unwrap();
+                let doc = docs.get_mut(&info.id).ok_or(DocError::NotFound(info.id))?;
+                Self::ensure_slides(doc, info.id)?;
+                let src = &mut doc.slides.as_mut().unwrap().1;
+                if let Some(media) = content["media"].as_object() {
+                    for (part, v) in media {
+                        let (Ok(name), Some(data)) =
+                            (prism_openxml::PartName::new(part), v.as_str())
+                        else {
+                            continue;
+                        };
+                        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) {
+                            let ct = match name.extension().as_deref() {
+                                Some("jpeg" | "jpg") => "image/jpeg",
+                                Some("gif") => "image/gif",
+                                Some("svg") => "image/svg+xml",
+                                _ => "image/png",
+                            };
+                            src.package.set_part(name, bytes, Some(ct));
+                        }
+                    }
+                }
+            }
+            self.set_slides(info.id, model)?;
         }
         {
             let mut docs = self.docs.lock().unwrap();
@@ -552,5 +678,55 @@ mod tests {
         assert!(matches!(reg.word(opened.id), Err(DocError::NotWord(_))));
         reg.close(opened.id).unwrap();
         assert!(matches!(reg.get(opened.id), Err(DocError::NotFound(_))));
+    }
+
+    #[test]
+    fn presentation_model_save_and_recovery() {
+        let dir = std::env::temp_dir().join(format!("prism-slide-doc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let reg = DocumentRegistry::default();
+        let d = reg.create(DocumentKind::Presentation);
+        let mut m = reg.slides(d.id).unwrap();
+        assert_eq!(m.masters[0].layouts.len(), 6);
+        let png = [0x89u8, b'P', b'N', b'G', 1, 2, 3];
+        let part = reg.add_slide_image(d.id, &png).unwrap();
+        assert!(part.starts_with("/ppt/media/"));
+        let mut slide = m.slides[0].clone();
+        slide.part = None;
+        slide.notes = "second".into();
+        slide.layout = m.masters[0].layouts[5].part.clone();
+        let pic: prism_drawingml::shape::Node = serde_json::from_value(serde_json::json!({
+            "type": "picture", "id": 10, "name": "Picture 1",
+            "xfrm": {"x": 0, "y": 0, "cx": 914400, "cy": 914400},
+            "image": {"t": "image", "relId": part}
+        }))
+        .unwrap();
+        slide.shapes = vec![pic];
+        m.slides.push(slide);
+        reg.set_slides(d.id, m).unwrap();
+        let store = crate::recovery::RecoveryStore::new(dir.join("rec"));
+        assert_eq!(reg.journal_changes(&store), 1);
+        // recovery of the unsaved presentation brings back the picture bytes
+        let key = reg.recovery_key(d.id).unwrap();
+        let restored = reg.restore(&store, &key).unwrap();
+        let rm = reg.slides(restored.id).unwrap();
+        assert_eq!(rm.slides.len(), 2);
+        assert_eq!(reg.slide_part(restored.id, &part).unwrap().unwrap().1, png);
+        // save and reopen
+        let path = dir.join("Deck.pptx");
+        reg.save(d.id, Some(&path)).unwrap();
+        let reopened = reg.open(&path).unwrap();
+        let m2 = reg.slides(reopened.id).unwrap();
+        assert_eq!(m2.slides.len(), 2);
+        assert_eq!(m2.slides[1].notes, "second");
+        let prism_drawingml::shape::Node::Picture(p) = &m2.slides[1].shapes[0] else {
+            panic!()
+        };
+        let prism_drawingml::fill::Fill::Image { rel_id, .. } = &p.image else {
+            panic!()
+        };
+        assert_eq!(reg.slide_part(reopened.id, rel_id).unwrap().unwrap().1, png);
+        assert!(matches!(reg.sheet(reopened.id), Err(DocError::NotSheet(_))));
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

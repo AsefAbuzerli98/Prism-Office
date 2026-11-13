@@ -1,5 +1,6 @@
 import { blankDocument, type WordDocument } from "../word/model";
 import { blankWorkbook, type WorkbookModel } from "../sheet/model";
+import { blankPresentation, type PresentationModel } from "../slide/model";
 import type { Mode } from "./modes";
 import { MODES, modeFromPath } from "./modes";
 
@@ -148,6 +149,13 @@ export interface HostBridge {
   /** Spreadsheet model of a workbook (Workbook mode). */
   getSheetModel(id: number): Promise<WorkbookModel>;
   updateSheetModel(id: number, content: WorkbookModel): Promise<void>;
+  /** Presentation model (Presentation mode). */
+  getPresentationModel(id: number): Promise<PresentationModel>;
+  updatePresentationModel(id: number, content: PresentationModel): Promise<void>;
+  /** A picture/media part (base64) referenced by part name. */
+  getSlidePart(id: number, part: string): Promise<{ mime: string; data: string } | null>;
+  /** Store a picture (base64); resolves to its part name. */
+  addSlideImage(id: number, base64: string): Promise<string>;
   /** Run one `=PY` cell in the host's Python sandbox. */
   runPython(code: string, inputs: unknown, returnType: number): Promise<PyResult>;
   pythonStatus(): Promise<PyStatus>;
@@ -277,6 +285,18 @@ export class TauriHost implements HostBridge {
   }
   updateSheetModel(id: number, content: WorkbookModel) {
     return this.api.invoke<void>("update_sheet_model", { id, content });
+  }
+  getPresentationModel(id: number) {
+    return this.api.invoke<PresentationModel>("get_presentation_model", { id });
+  }
+  updatePresentationModel(id: number, content: PresentationModel) {
+    return this.api.invoke<void>("update_presentation_model", { id, content });
+  }
+  getSlidePart(id: number, part: string) {
+    return this.api.invoke<{ mime: string; data: string } | null>("get_slide_part", { id, part });
+  }
+  addSlideImage(id: number, data: string) {
+    return this.api.invoke<string>("add_slide_image", { id, data });
   }
   getWordImage(id: number, relId: string) {
     return this.api.invoke<{ mime: string; data: string } | null>("get_word_image", { id, relId });
@@ -492,6 +512,37 @@ export class BrowserHost implements HostBridge {
   async updateSheetModel(id: number, content: WorkbookModel): Promise<void> {
     if (!this.docs.has(id)) throw new Error(`no open document with id ${id}`);
     this.sheetModels.set(id, structuredClone(content));
+  }
+
+  private presentations = new Map<number, PresentationModel>();
+
+  async getPresentationModel(id: number): Promise<PresentationModel> {
+    const doc = this.docs.get(id);
+    if (!doc) throw new Error(`no open document with id ${id}`);
+    if (doc.kind !== "presentation") throw new Error(`document ${id} is not a presentation`);
+    let m = this.presentations.get(id);
+    if (!m) {
+      m = blankPresentation();
+      this.presentations.set(id, m);
+    }
+    return structuredClone(m);
+  }
+
+  async updatePresentationModel(id: number, content: PresentationModel): Promise<void> {
+    if (!this.docs.has(id)) throw new Error(`no open document with id ${id}`);
+    this.presentations.set(id, structuredClone(content));
+  }
+
+  private slideParts = new Map<string, { mime: string; data: string }>();
+  async getSlidePart(id: number, part: string) {
+    return this.slideParts.get(`${id}:${part}`) ?? null;
+  }
+  async addSlideImage(id: number, data: string) {
+    const { mime } = imageInfo(data);
+    const ext = mime.split("/")[1]?.replace("svg+xml", "svg") ?? "png";
+    const part = `/ppt/media/image${this.slideParts.size + 1}.${ext}`;
+    this.slideParts.set(`${id}:${part}`, { mime, data });
+    return part;
   }
 
   private images = new Map<string, { mime: string; data: string }>();

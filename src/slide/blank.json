@@ -1,0 +1,1421 @@
+{
+  "width": 12192000,
+  "height": 6858000,
+  "masters": [
+    {
+      "part": "/ppt/slideMasters/slideMaster1.xml",
+      "theme": {
+        "name": "Prism",
+        "colors": [
+          [
+            "dk1",
+            "000000"
+          ],
+          [
+            "lt1",
+            "FFFFFF"
+          ],
+          [
+            "dk2",
+            "1F2937"
+          ],
+          [
+            "lt2",
+            "F3F4F6"
+          ],
+          [
+            "accent1",
+            "C2553A"
+          ],
+          [
+            "accent2",
+            "2563EB"
+          ],
+          [
+            "accent3",
+            "059669"
+          ],
+          [
+            "accent4",
+            "D97706"
+          ],
+          [
+            "accent5",
+            "7C3AED"
+          ],
+          [
+            "accent6",
+            "0891B2"
+          ],
+          [
+            "hlink",
+            "2563EB"
+          ],
+          [
+            "folHlink",
+            "7C3AED"
+          ]
+        ],
+        "majorFont": "Calibri Light",
+        "minorFont": "Calibri",
+        "fillStyles": [
+          "<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>",
+          "<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>",
+          "<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>"
+        ],
+        "lineStyles": [
+          "<a:ln w=\"6350\"><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:ln>",
+          "<a:ln w=\"6350\"><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:ln>",
+          "<a:ln w=\"6350\"><a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill></a:ln>"
+        ],
+        "bgFillStyles": [
+          "<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>",
+          "<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>",
+          "<a:solidFill><a:schemeClr val=\"phClr\"/></a:solidFill>"
+        ]
+      },
+      "clrMap": [
+        [
+          "bg1",
+          "lt1"
+        ],
+        [
+          "tx1",
+          "dk1"
+        ],
+        [
+          "bg2",
+          "lt2"
+        ],
+        [
+          "tx2",
+          "dk2"
+        ],
+        [
+          "accent1",
+          "accent1"
+        ],
+        [
+          "accent2",
+          "accent2"
+        ],
+        [
+          "accent3",
+          "accent3"
+        ],
+        [
+          "accent4",
+          "accent4"
+        ],
+        [
+          "accent5",
+          "accent5"
+        ],
+        [
+          "accent6",
+          "accent6"
+        ],
+        [
+          "hlink",
+          "hlink"
+        ],
+        [
+          "folHlink",
+          "folHlink"
+        ]
+      ],
+      "background": {
+        "styleRef": [
+          1001,
+          {
+            "base": {
+              "t": "scheme",
+              "v": "bg1"
+            }
+          }
+        ]
+      },
+      "shapes": [
+        {
+          "type": "shape",
+          "id": 2,
+          "name": "Title Placeholder 1",
+          "ph": {
+            "kind": "title"
+          },
+          "xfrm": {
+            "x": 838200,
+            "y": 365125,
+            "cx": 10515600,
+            "cy": 1325563,
+            "rot": 0
+          },
+          "geom": {
+            "t": "preset",
+            "name": "rect"
+          },
+          "text": {
+            "body": {
+              "anchor": "ctr",
+              "insets": [
+                91440,
+                45720,
+                91440,
+                45720
+              ],
+              "autofit": {
+                "t": "normal",
+                "fontScale": null,
+                "lineReduction": null
+              },
+              "vert": "horz"
+            },
+            "paragraphs": [
+              {
+                "props": {},
+                "runs": [
+                  {
+                    "t": "text",
+                    "text": "Click to edit Master title style",
+                    "props": {
+                      "lang": "en-US"
+                    }
+                  }
+                ],
+                "end": {
+                  "lang": "en-US"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "shape",
+          "id": 3,
+          "name": "Text Placeholder 2",
+          "ph": {
+            "kind": "body",
+            "idx": 1
+          },
+          "xfrm": {
+            "x": 838200,
+            "y": 1825625,
+            "cx": 10515600,
+            "cy": 4351338,
+            "rot": 0
+          },
+          "geom": {
+            "t": "preset",
+            "name": "rect"
+          },
+          "text": {
+            "body": {
+              "insets": [
+                91440,
+                45720,
+                91440,
+                45720
+              ],
+              "autofit": {
+                "t": "normal",
+                "fontScale": null,
+                "lineReduction": null
+              },
+              "vert": "horz"
+            },
+            "paragraphs": [
+              {
+                "props": {
+                  "level": 0
+                },
+                "runs": [
+                  {
+                    "t": "text",
+                    "text": "Click to edit Master text styles",
+                    "props": {
+                      "lang": "en-US"
+                    }
+                  }
+                ],
+                "end": {
+                  "lang": "en-US"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "shape",
+          "id": 4,
+          "name": "Date Placeholder 3",
+          "ph": {
+            "kind": "dt",
+            "idx": 2
+          },
+          "xfrm": {
+            "x": 838200,
+            "y": 6356350,
+            "cx": 2743200,
+            "cy": 365125,
+            "rot": 0
+          },
+          "geom": {
+            "t": "preset",
+            "name": "rect"
+          },
+          "text": {
+            "body": {
+              "anchor": "ctr"
+            },
+            "listStyle": {
+              "levels": [
+                {
+                  "align": "l",
+                  "run": {
+                    "size": 1200,
+                    "fill": {
+                      "t": "solid",
+                      "color": {
+                        "base": {
+                          "t": "scheme",
+                          "v": "tx1"
+                        },
+                        "mods": [
+                          {
+                            "name": "tint",
+                            "val": 75000
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            },
+            "paragraphs": [
+              {
+                "props": {},
+                "runs": [],
+                "end": {
+                  "lang": "en-US"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "shape",
+          "id": 5,
+          "name": "Footer Placeholder 4",
+          "ph": {
+            "kind": "ftr",
+            "idx": 3
+          },
+          "xfrm": {
+            "x": 4038600,
+            "y": 6356350,
+            "cx": 4114800,
+            "cy": 365125,
+            "rot": 0
+          },
+          "geom": {
+            "t": "preset",
+            "name": "rect"
+          },
+          "text": {
+            "body": {
+              "anchor": "ctr"
+            },
+            "listStyle": {
+              "levels": [
+                {
+                  "align": "ctr",
+                  "run": {
+                    "size": 1200,
+                    "fill": {
+                      "t": "solid",
+                      "color": {
+                        "base": {
+                          "t": "scheme",
+                          "v": "tx1"
+                        },
+                        "mods": [
+                          {
+                            "name": "tint",
+                            "val": 75000
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            },
+            "paragraphs": [
+              {
+                "props": {},
+                "runs": [],
+                "end": {
+                  "lang": "en-US"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "shape",
+          "id": 6,
+          "name": "Slide Number Placeholder 5",
+          "ph": {
+            "kind": "sldNum",
+            "idx": 4
+          },
+          "xfrm": {
+            "x": 8610600,
+            "y": 6356350,
+            "cx": 2743200,
+            "cy": 365125,
+            "rot": 0
+          },
+          "geom": {
+            "t": "preset",
+            "name": "rect"
+          },
+          "text": {
+            "body": {
+              "anchor": "ctr"
+            },
+            "listStyle": {
+              "levels": [
+                {
+                  "align": "r",
+                  "run": {
+                    "size": 1200,
+                    "fill": {
+                      "t": "solid",
+                      "color": {
+                        "base": {
+                          "t": "scheme",
+                          "v": "tx1"
+                        },
+                        "mods": [
+                          {
+                            "name": "tint",
+                            "val": 75000
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ]
+            },
+            "paragraphs": [
+              {
+                "props": {},
+                "runs": [],
+                "end": {
+                  "lang": "en-US"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "textStyles": {
+        "title": {
+          "levels": [
+            {
+              "align": "l",
+              "lineSpacing": {
+                "t": "pct",
+                "v": 90000
+              },
+              "spaceBefore": {
+                "t": "pct",
+                "v": 0
+              },
+              "bullet": {
+                "t": "none"
+              },
+              "rtl": false,
+              "run": {
+                "size": 4400,
+                "font": "+mj-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        "body": {
+          "levels": [
+            {
+              "align": "l",
+              "marginLeft": 228600,
+              "indent": -228600,
+              "lineSpacing": {
+                "t": "pct",
+                "v": 90000
+              },
+              "spaceBefore": {
+                "t": "pts",
+                "v": 1000
+              },
+              "bullet": {
+                "t": "char",
+                "ch": "•",
+                "font": "Arial"
+              },
+              "rtl": false,
+              "run": {
+                "size": 2800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 685800,
+              "indent": -228600,
+              "lineSpacing": {
+                "t": "pct",
+                "v": 90000
+              },
+              "spaceBefore": {
+                "t": "pts",
+                "v": 500
+              },
+              "bullet": {
+                "t": "char",
+                "ch": "•",
+                "font": "Arial"
+              },
+              "rtl": false,
+              "run": {
+                "size": 2400,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 1143000,
+              "indent": -228600,
+              "lineSpacing": {
+                "t": "pct",
+                "v": 90000
+              },
+              "spaceBefore": {
+                "t": "pts",
+                "v": 500
+              },
+              "bullet": {
+                "t": "char",
+                "ch": "•",
+                "font": "Arial"
+              },
+              "rtl": false,
+              "run": {
+                "size": 2000,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 1600200,
+              "indent": -228600,
+              "lineSpacing": {
+                "t": "pct",
+                "v": 90000
+              },
+              "spaceBefore": {
+                "t": "pts",
+                "v": 500
+              },
+              "bullet": {
+                "t": "char",
+                "ch": "•",
+                "font": "Arial"
+              },
+              "rtl": false,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 2057400,
+              "indent": -228600,
+              "lineSpacing": {
+                "t": "pct",
+                "v": 90000
+              },
+              "spaceBefore": {
+                "t": "pts",
+                "v": 500
+              },
+              "bullet": {
+                "t": "char",
+                "ch": "•",
+                "font": "Arial"
+              },
+              "rtl": false,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 2514600,
+              "indent": -228600,
+              "lineSpacing": {
+                "t": "pct",
+                "v": 90000
+              },
+              "spaceBefore": {
+                "t": "pts",
+                "v": 500
+              },
+              "bullet": {
+                "t": "char",
+                "ch": "•",
+                "font": "Arial"
+              },
+              "rtl": false,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 2971800,
+              "indent": -228600,
+              "lineSpacing": {
+                "t": "pct",
+                "v": 90000
+              },
+              "spaceBefore": {
+                "t": "pts",
+                "v": 500
+              },
+              "bullet": {
+                "t": "char",
+                "ch": "•",
+                "font": "Arial"
+              },
+              "rtl": false,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 3429000,
+              "indent": -228600,
+              "lineSpacing": {
+                "t": "pct",
+                "v": 90000
+              },
+              "spaceBefore": {
+                "t": "pts",
+                "v": 500
+              },
+              "bullet": {
+                "t": "char",
+                "ch": "•",
+                "font": "Arial"
+              },
+              "rtl": false,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 3886200,
+              "indent": -228600,
+              "lineSpacing": {
+                "t": "pct",
+                "v": 90000
+              },
+              "spaceBefore": {
+                "t": "pts",
+                "v": 500
+              },
+              "bullet": {
+                "t": "char",
+                "ch": "•",
+                "font": "Arial"
+              },
+              "rtl": false,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "other": {
+          "default": {
+            "run": {
+              "lang": "en-US"
+            }
+          },
+          "levels": [
+            {
+              "align": "l",
+              "marginLeft": 0,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 457200,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 914400,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 1371600,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 1828800,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 2286000,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 2743200,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 3200400,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "align": "l",
+              "marginLeft": 3657600,
+              "run": {
+                "size": 1800,
+                "font": "+mn-lt",
+                "fill": {
+                  "t": "solid",
+                  "color": {
+                    "base": {
+                      "t": "scheme",
+                      "v": "tx1"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "layouts": [
+        {
+          "part": "/ppt/slideLayouts/slideLayout1.xml",
+          "name": "Title Slide",
+          "kind": "title",
+          "shapes": [
+            {
+              "type": "shape",
+              "id": 2,
+              "name": "Title 1",
+              "ph": {
+                "kind": "ctrTitle"
+              },
+              "xfrm": {
+                "x": 1524000,
+                "y": 1122363,
+                "cx": 9144000,
+                "cy": 2387600,
+                "rot": 0
+              },
+              "geom": {
+                "t": "preset",
+                "name": "rect"
+              },
+              "text": {
+                "body": {
+                  "anchor": "b"
+                },
+                "listStyle": {
+                  "levels": [
+                    {
+                      "align": "ctr",
+                      "run": {
+                        "size": 6000
+                      }
+                    },
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                  ]
+                },
+                "paragraphs": [
+                  {
+                    "props": {},
+                    "runs": [],
+                    "end": {
+                      "lang": "en-US"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "shape",
+              "id": 3,
+              "name": "Subtitle 2",
+              "ph": {
+                "kind": "subTitle",
+                "idx": 1
+              },
+              "xfrm": {
+                "x": 1524000,
+                "y": 3602038,
+                "cx": 9144000,
+                "cy": 1655762,
+                "rot": 0
+              },
+              "geom": {
+                "t": "preset",
+                "name": "rect"
+              },
+              "text": {
+                "body": {},
+                "listStyle": {
+                  "levels": [
+                    {
+                      "align": "ctr",
+                      "marginLeft": 0,
+                      "indent": 0,
+                      "bullet": {
+                        "t": "none"
+                      },
+                      "run": {
+                        "size": 2400
+                      }
+                    },
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                  ]
+                },
+                "paragraphs": [
+                  {
+                    "props": {},
+                    "runs": [],
+                    "end": {
+                      "lang": "en-US"
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "showMasterShapes": true
+        },
+        {
+          "part": "/ppt/slideLayouts/slideLayout2.xml",
+          "name": "Title and Content",
+          "kind": "obj",
+          "shapes": [
+            {
+              "type": "shape",
+              "id": 2,
+              "name": "Title",
+              "ph": {
+                "kind": "title"
+              },
+              "text": {
+                "body": {},
+                "paragraphs": [
+                  {
+                    "props": {},
+                    "runs": [],
+                    "end": {
+                      "lang": "en-US"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "shape",
+              "id": 3,
+              "name": "Content Placeholder",
+              "ph": {
+                "idx": 1
+              },
+              "text": {
+                "body": {},
+                "paragraphs": [
+                  {
+                    "props": {},
+                    "runs": [],
+                    "end": {
+                      "lang": "en-US"
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "showMasterShapes": true
+        },
+        {
+          "part": "/ppt/slideLayouts/slideLayout3.xml",
+          "name": "Section Header",
+          "kind": "secHead",
+          "shapes": [
+            {
+              "type": "shape",
+              "id": 2,
+              "name": "Title 1",
+              "ph": {
+                "kind": "title"
+              },
+              "xfrm": {
+                "x": 831850,
+                "y": 1709738,
+                "cx": 10515600,
+                "cy": 2852737,
+                "rot": 0
+              },
+              "geom": {
+                "t": "preset",
+                "name": "rect"
+              },
+              "text": {
+                "body": {
+                  "anchor": "b"
+                },
+                "listStyle": {
+                  "levels": [
+                    {
+                      "run": {
+                        "size": 6000
+                      }
+                    },
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                  ]
+                },
+                "paragraphs": [
+                  {
+                    "props": {},
+                    "runs": [],
+                    "end": {
+                      "lang": "en-US"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "shape",
+              "id": 3,
+              "name": "Text Placeholder 2",
+              "ph": {
+                "kind": "body",
+                "idx": 1
+              },
+              "xfrm": {
+                "x": 831850,
+                "y": 4589463,
+                "cx": 10515600,
+                "cy": 1500187,
+                "rot": 0
+              },
+              "geom": {
+                "t": "preset",
+                "name": "rect"
+              },
+              "text": {
+                "body": {},
+                "listStyle": {
+                  "levels": [
+                    {
+                      "marginLeft": 0,
+                      "indent": 0,
+                      "bullet": {
+                        "t": "none"
+                      },
+                      "run": {
+                        "size": 2400,
+                        "fill": {
+                          "t": "solid",
+                          "color": {
+                            "base": {
+                              "t": "scheme",
+                              "v": "tx1"
+                            },
+                            "mods": [
+                              {
+                                "name": "tint",
+                                "val": 75000
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null
+                  ]
+                },
+                "paragraphs": [
+                  {
+                    "props": {},
+                    "runs": [],
+                    "end": {
+                      "lang": "en-US"
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "showMasterShapes": true
+        },
+        {
+          "part": "/ppt/slideLayouts/slideLayout4.xml",
+          "name": "Two Content",
+          "kind": "twoObj",
+          "shapes": [
+            {
+              "type": "shape",
+              "id": 2,
+              "name": "Title",
+              "ph": {
+                "kind": "title"
+              },
+              "text": {
+                "body": {},
+                "paragraphs": [
+                  {
+                    "props": {},
+                    "runs": [],
+                    "end": {
+                      "lang": "en-US"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "shape",
+              "id": 3,
+              "name": "Content Placeholder",
+              "ph": {
+                "idx": 1
+              },
+              "xfrm": {
+                "x": 838200,
+                "y": 1825625,
+                "cx": 5181600,
+                "cy": 4351338,
+                "rot": 0
+              },
+              "geom": {
+                "t": "preset",
+                "name": "rect"
+              },
+              "text": {
+                "body": {},
+                "paragraphs": [
+                  {
+                    "props": {},
+                    "runs": [],
+                    "end": {
+                      "lang": "en-US"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "shape",
+              "id": 4,
+              "name": "Content Placeholder",
+              "ph": {
+                "idx": 2
+              },
+              "xfrm": {
+                "x": 6172200,
+                "y": 1825625,
+                "cx": 5181600,
+                "cy": 4351338,
+                "rot": 0
+              },
+              "geom": {
+                "t": "preset",
+                "name": "rect"
+              },
+              "text": {
+                "body": {},
+                "paragraphs": [
+                  {
+                    "props": {},
+                    "runs": [],
+                    "end": {
+                      "lang": "en-US"
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "showMasterShapes": true
+        },
+        {
+          "part": "/ppt/slideLayouts/slideLayout5.xml",
+          "name": "Title Only",
+          "kind": "titleOnly",
+          "shapes": [
+            {
+              "type": "shape",
+              "id": 2,
+              "name": "Title",
+              "ph": {
+                "kind": "title"
+              },
+              "text": {
+                "body": {},
+                "paragraphs": [
+                  {
+                    "props": {},
+                    "runs": [],
+                    "end": {
+                      "lang": "en-US"
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "showMasterShapes": true
+        },
+        {
+          "part": "/ppt/slideLayouts/slideLayout6.xml",
+          "name": "Blank",
+          "kind": "blank",
+          "shapes": [],
+          "showMasterShapes": true
+        }
+      ]
+    }
+  ],
+  "slides": [
+    {
+      "part": "/ppt/slides/slide1.xml",
+      "layout": "/ppt/slideLayouts/slideLayout1.xml",
+      "shapes": [
+        {
+          "type": "shape",
+          "id": 2,
+          "name": "Title 1",
+          "ph": {
+            "kind": "ctrTitle"
+          },
+          "text": {
+            "body": {},
+            "paragraphs": [
+              {
+                "props": {},
+                "runs": [],
+                "end": {
+                  "lang": "en-US"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "type": "shape",
+          "id": 3,
+          "name": "Subtitle 2",
+          "ph": {
+            "kind": "subTitle",
+            "idx": 1
+          },
+          "text": {
+            "body": {},
+            "paragraphs": [
+              {
+                "props": {},
+                "runs": [],
+                "end": {
+                  "lang": "en-US"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "notes": ""
+    }
+  ],
+  "defaultTextStyle": {
+    "default": {
+      "run": {
+        "lang": "en-US"
+      }
+    },
+    "levels": []
+  }
+}

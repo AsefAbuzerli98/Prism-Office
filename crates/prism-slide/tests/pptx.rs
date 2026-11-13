@@ -259,3 +259,17 @@ fn blank_template_has_standard_layouts() {
     );
     assert_eq!(m.slides.len(), 1);
 }
+
+/// The browser preview ships the blank model as JSON; keep it in sync
+/// (regenerate with `cargo run -p prism-slide --example dump_model > src/slide/blank.json`).
+#[test]
+fn browser_blank_model_matches_template() {
+    let bytes = prism_openxml::templates::blank(prism_openxml::DocumentKind::Presentation)
+        .to_bytes()
+        .unwrap();
+    let (m, _) = read_pptx(&bytes).unwrap();
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../src/slide/blank.json");
+    let shipped: PresentationModel =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(m, shipped, "src/slide/blank.json is stale");
+}

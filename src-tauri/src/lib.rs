@@ -95,6 +95,49 @@ fn update_sheet_model(
     docs.set_sheet(id, content)
 }
 
+#[tauri::command]
+fn get_presentation_model(
+    id: u64,
+    docs: State<'_, DocumentRegistry>,
+) -> Result<prism_slide::PresentationModel, DocError> {
+    docs.slides(id)
+}
+
+#[tauri::command]
+fn update_presentation_model(
+    id: u64,
+    content: prism_slide::PresentationModel,
+    docs: State<'_, DocumentRegistry>,
+) -> Result<(), DocError> {
+    docs.set_slides(id, content)
+}
+
+/// A picture/media part of a presentation as base64.
+#[tauri::command]
+fn get_slide_part(
+    id: u64,
+    part: String,
+    docs: State<'_, DocumentRegistry>,
+) -> Result<Option<ImageData>, DocError> {
+    use base64::Engine;
+    Ok(docs.slide_part(id, &part)?.map(|(mime, bytes)| ImageData {
+        mime,
+        data: b64().encode(bytes),
+    }))
+}
+
+/// Store a picture (base64); returns the part name to reference it by.
+#[tauri::command]
+fn add_slide_image(
+    id: u64,
+    data: String,
+    docs: State<'_, DocumentRegistry>,
+) -> Result<String, String> {
+    use base64::Engine;
+    let bytes = b64().decode(data.as_bytes()).map_err(|e| e.to_string())?;
+    docs.add_slide_image(id, &bytes).map_err(|e| e.to_string())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppInfo {
@@ -523,6 +566,10 @@ pub fn run() {
             query_database,
             read_text_file,
             update_sheet_model,
+            get_presentation_model,
+            update_presentation_model,
+            get_slide_part,
+            add_slide_image,
             update_word_document,
             get_word_image,
             add_word_image,

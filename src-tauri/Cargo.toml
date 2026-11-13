@@ -17,6 +17,8 @@ tauri-build = { version = "2", features = [] }
 prism-openxml.workspace = true
 prism-word.workspace = true
 prism-sheet.workspace = true
+prism-slide.workspace = true
+prism-drawingml.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
