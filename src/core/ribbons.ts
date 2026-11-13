@@ -419,7 +419,6 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
             cmd("ppt.record", "Record", "⏺", 4),
             cmd("ppt.teleprompter", "Teleprompter", "☰", 4),
             cmd("ppt.export", "Export MP4", "🎞", 4),
-            cmd("ppt.coach", "Speaker Coach", "🎙", 4),
           ],
         },
       ],

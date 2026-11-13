@@ -89,20 +89,20 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 
 ## Phase 4 — Presentation & Vector Engine
 
-- [ ] **P4-01** Shared DrawingML engine crate (shapes, geometry presets, fills, gradients, effects, 3D).
-- [ ] **P4-02** PPTX import/export (slides, layouts, masters, themes, notes).
-- [ ] **P4-03** GPU slide compositor (WebGPU) with thumbnails rail and zoom.
-- [ ] **P4-04** Slide editing: selection, transform handles, snapping, alignment guides.
-- [ ] **P4-05** Animation timeline & transitions, incl. Morph.
-- [ ] **P4-06** Slideshow mode + presenter view (dual display).
-- [ ] **P4-07** Cameo live camera object (vector-masked frames, effects, morphs across slides).
-- [ ] **P4-08** Native capture: AVFoundation (macOS) / Media Foundation (Windows).
-- [ ] **P4-09** Recording Studio: multi-track camera/mic/ink/transition timeline.
-- [ ] **P4-10** Teleprompter in presenter view (positioned under webcam).
-- [ ] **P4-11** MP4 export 1080p/4K with chapter bookmarks.
-- [ ] **P4-12** AI presentation generator (from text/bullets/linked docx).
-- [ ] **P4-13** Speaker Coach (pace, pitch, filler words, engagement).
-- [ ] **P4-14** Live Presenting: QR audience link + live translated subtitles.
+- [x] **P4-01** Shared DrawingML engine crate (shapes, geometry presets, fills, gradients, effects, 3D). _(`prism-drawingml`: 99 preset geometries + custom geometry (guide evaluator, arcTo), theme colours with PowerPoint-exact transforms, solid/gradient/pattern/picture fills, lines with dashes/arrowheads, outer shadows, text bodies; Rust + WASM. 3D (`scene3d`/`sp3d`), glow, soft edges and reflection are preserved in files but not rendered; `sun` has no rays and callouts are approximations)_
+- [x] **P4-02** PPTX import/export (slides, layouts, masters, themes, notes). _(`prism-slide`: lossless round-trip — unchanged shapes are written byte-identical; add/remove/reorder slides, layouts, notes (creates a notes master), backgrounds, hidden slides, pictures, tables, groups, transitions incl. Morph, animations; checked with python-pptx and LibreOffice. SmartArt/OLE/media frames pass through untouched)_
+- [~] **P4-03** GPU slide compositor (WebGPU) with thumbnails rail and zoom. _(Canvas 2D slide rasteriser (placeholder inheritance, text layout with autofit, charts from cached values) composited by the shared P2-07 compositor — WebGL2 by default; the WebGPU backend is opt-in and untested on real GPUs, like P2-07)_
+- [x] **P4-04** Slide editing: selection, transform handles, snapping, alignment guides. _(move/resize/rotate handles incl. rotated shapes, smart guides to slide and shapes, marquee, in-place rich text editing, insert text boxes/shapes/pictures/tables, z-order, group/ungroup, clipboard, notes, layouts, undo/redo)_
+- [x] **P4-05** Animation timeline & transitions, incl. Morph. _(click-step timeline (on click / with / after previous, delays, repeats), entrance/exit/emphasis/motion paths, 17 transitions, Morph matching shapes by name/picture/text/placeholder with position/size/rotation/colour interpolation. Rare effects (blinds, checkerboard, strips…) play as fades; Morph by word/character crossfades text rather than moving letters)_
+- [x] **P4-06** Slideshow mode + presenter view (dual display). _(full screen, builds, auto-advance, jump to slide, black/white screen; presenter view with current/next slide, notes, timer and an audience window placed on the second screen via the Window Management API when allowed. The audience window uses `window.open`; inside the Tauri shell this still needs verifying on real hardware (a native second window may be required))_
+- [x] **P4-07** Cameo live camera object (vector-masked frames, effects, morphs across slides). _(camera feed masked by any preset geometry, border/shadow, mirror, device picker; Morph carries a cameo across slides by name. Stored as a normal shape + Prism extLst data, so PowerPoint shows its fill; PowerPoint's own cameos are not recognised as live)_
+- [~] **P4-08** Native capture: AVFoundation (macOS) / Media Foundation (Windows). _(capture goes through the webview media stack — AVFoundation in WKWebView, Media Foundation in WebView2 — with macOS usage strings and hardened-runtime entitlements; there is no separate native Rust capture pipeline, and none of this was run on real macOS/Windows hardware here)_
+- [x] **P4-09** Recording Studio: multi-track camera/mic/ink/transition timeline. _(narration, camera track, timestamped pen/highlighter/eraser ink, navigation timeline, pause/resume, preview, save timings as auto-advance. Takes live in memory and are exported as video — narration is not embedded into the .pptx)_
+- [x] **P4-10** Teleprompter in presenter view (positioned under webcam). _(top-centre band in the presenter view and the studio: speed, size, mirror, voice-paced scrolling)_
+- [x] **P4-11** MP4 export 1080p/4K with chapter bookmarks. _(offline frame rendering incl. transitions, Morph, builds, ink and recorded camera; WebCodecs H.264 (VP9 fallback) + AAC (Opus fallback); own ISO BMFF muxer with Nero `chpl` chapters — output verified with ffprobe/ffmpeg. Codec availability depends on the webview (Linux Chromium has no AAC encoder, so audio falls back to Opus))_
+- [x] **P4-12** AI presentation generator (from text/bullets/linked docx). _(JSON outline from the AI daemon laid out on the deck's own layouts with speaker notes; Word documents are read through `prism-word` as Markdown. Not exercised against the live API in this environment (no key))_
+- [x] **P4-13** Speaker Coach (pace, pitch, filler words, engagement). _(local: pitch + monotone detection, loudness, long pauses, syllable-based pace; with the webview's speech recognition also words/min, fillers (en/az/tr/ru), repetition and reading the slide. Speech recognition exists only in some webviews (and Chromium's is an online service); without it fillers are not counted. No camera-based eye-contact analysis)_
+- [x] **P4-14** Live Presenting: QR audience link + live translated subtitles. _(token-protected LAN server in the host (viewer page, slide image, server-sent events), QR code from an own ISO 18004 encoder, subtitles from speech recognition translated with the AI service into each viewer's language. Same network only, plain HTTP (no TLS); not tried on real phones here — the server is covered by an integration test)_
 
 ## Cross-cutting
 
@@ -123,6 +123,14 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 ---
 
 ## Progress log
+
+- **2026-11-13** — Phase 4 complete (two items partial): `prism-drawingml` and
+  `prism-slide` crates (lossless PPTX), canvas slide renderer on the shared
+  compositor, slide editor with handles/guides/rich text, animations,
+  transitions and Morph, slideshow + presenter view, Cameo, Recording Studio,
+  teleprompter, MP4 export with chapters, AI deck generator, Speaker Coach and
+  Live Presenting. Also fixed the app CSP so the WASM engines may compile in
+  WebView2/WKWebView (`wasm-unsafe-eval`).
 
 - **2026-11-12** — Phase 2 complete except WebGPU validation (P2-07): tables,
   pictures, shapes, notes, headers/footers, fields, tracked changes, comments,
