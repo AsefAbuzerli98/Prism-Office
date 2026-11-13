@@ -10,6 +10,8 @@ import { renderHub } from "../hub/hub";
 import { renderEngineView } from "../modes/views";
 import { WordEditor, type EngineView } from "../word/editor";
 import { SheetEditor } from "../sheet/editor";
+import { SlideEditor } from "../slide/editor";
+import { allPresetNames } from "../slide/engine";
 import type { AsyncRequest } from "../sheet/engine";
 import { jsonToRows, parseCsv } from "../sheet/data";
 import { openPivotDialog } from "../sheet/pivot-dialog";
@@ -64,6 +66,7 @@ export class Shell {
     this.registerCommands();
     this.registerWordCommands();
     this.registerSheetCommands();
+    this.registerSlideCommands();
 
     root.replaceChildren(
       h("div", { class: "titlebar", "data-tauri-drag-region": true }, this.strip),
@@ -269,6 +272,59 @@ export class Shell {
     return e instanceof SheetEditor ? e : null;
   }
 
+  /** The active tab's slide editor, if any. */
+  get activeSlides(): SlideEditor | null {
+    const tab = this.showHub ? null : this.tabs.active;
+    const e = tab ? this.views.get(tab.docId)?.engine : null;
+    return e instanceof SlideEditor ? e : null;
+  }
+
+  private registerSlideCommands() {
+    const ed = () => this.activeSlides;
+    const when = () => ed()?.model != null;
+    const simple = (id: string, cmd: string, arg?: string) => ({
+      id,
+      title: () => t(`ribbon.cmd.${id}`, {}, id),
+      when,
+      hidden: true,
+      run: () => {
+        ed()?.execute(cmd, arg);
+        ed()?.focus();
+      },
+    });
+    const sel = (id: string, cmd: string) => ({ ...simple(id, cmd), when: () => !!ed()?.model && (ed()!.selection.size > 0 || ed()!.isEditingText) });
+    this.commands.register(
+      { ...simple("ppt.newSlide", "newSlide"), hidden: false, keys: ["Mod+M"] },
+      simple("ppt.layout", "layout"),
+      { ...simple("ppt.duplicateSlide", "duplicateSlide"), hidden: false },
+      simple("ppt.deleteSlide", "deleteSlide"),
+      simple("ppt.hideSlide", "hideSlide"),
+      sel("ppt.font", "font"),
+      sel("ppt.bold", "bold"),
+      sel("ppt.italic", "italic"),
+      sel("ppt.underline", "underline"),
+      sel("ppt.strike", "strike"),
+      sel("ppt.grow", "grow"),
+      sel("ppt.shrink", "shrink"),
+      sel("ppt.color", "color"),
+      sel("ppt.bullets", "bullets"),
+      sel("ppt.numbering", "numbering"),
+      sel("ppt.alignLeft", "alignLeft"),
+      sel("ppt.alignCenter", "alignCenter"),
+      sel("ppt.alignRight", "alignRight"),
+      sel("ppt.justify", "justify"),
+      sel("ppt.fill", "fill"),
+      sel("ppt.outline", "outline"),
+      sel("ppt.arrange", "bringToFront"),
+      { ...simple("ppt.textBox", "insertTextBox"), hidden: false },
+      simple("ppt.shapes", "insertShape", "rect"),
+      { ...simple("ppt.picture", "insertImage"), hidden: false },
+      simple("ppt.table", "insertTable", "3x3"),
+      simple("ppt.slideSize", "slideSize"),
+      simple("ppt.background", "background"),
+    );
+  }
+
   private registerSheetCommands() {
     const ed = () => this.activeSheet;
     const when = () => ed()?.wb != null;
@@ -420,6 +476,8 @@ export class Shell {
 
   /** Ribbon commands that need an anchored picker. */
   private pickerCommand(id: string, anchor: HTMLElement): boolean {
+    const sl = this.activeSlides;
+    if (sl?.model) return this.slidePicker(sl, id, anchor);
     const sh = this.activeSheet;
     if (sh?.wb) {
       const colors = [["", t("sheet.none", {}, "None")], ["#FFF2CC", "Yellow"], ["#E2EFDA", "Green"], ["#DDEBF7", "Blue"], ["#FCE4D6", "Orange"], ["#C00000", "Red"], ["#1F4E78", "Navy"], ["#000000", "Black"]];
@@ -582,6 +640,80 @@ export class Shell {
     return false;
   }
 
+  private slidePicker(sl: SlideEditor, id: string, anchor: HTMLElement): boolean {
+    const m = sl.model!;
+    const pick = (items: { value: string; label: string; style?: string; selected?: boolean }[], run: (v: string) => void, title: string) => {
+      openPicker(anchor, items, (v) => {
+        run(v);
+        sl.focus();
+      }, title);
+      return true;
+    };
+    const title = t(`ribbon.cmd.${id}`, {}, id);
+    const colors: [string, string][] = [["#000000", "Black"], ["#FFFFFF", "White"], ["#C2553A", "Prism"], ["#C00000", "Red"], ["#ED7D31", "Orange"], ["#FFC000", "Gold"], ["#70AD47", "Green"], ["#4472C4", "Blue"], ["#7030A0", "Purple"], ["#7F7F7F", "Gray"]];
+    const swatches = (none?: string) => [...(none ? [{ value: "", label: none }] : []), ...colors.map(([v, l]) => ({ value: v, label: l, style: `border-left:14px solid ${v};padding-left:6px` }))];
+    const layouts = m.masters.flatMap((ms) => ms.layouts.map((l) => ({ value: l.part, label: l.name || l.part.split("/").pop()!, selected: l.part === sl.slide?.layout })));
+    switch (id) {
+      case "ppt.newSlide":
+        return pick(layouts.map((l) => ({ ...l, selected: false })), (v) => sl.execute("newSlide", v), title);
+      case "ppt.layout":
+        return pick(layouts, (v) => sl.execute("layout", v), title);
+      case "ppt.color":
+        return pick(swatches(), (v) => sl.execute("color", v), title);
+      case "ppt.fill":
+        return pick(swatches(t("sheet.none", {}, "None")), (v) => sl.execute("fill", v), title);
+      case "ppt.outline":
+        return pick(
+          [{ value: "none", label: t("sheet.none", {}, "None") }, ...swatches(), ...[0.75, 1.5, 3, 6].map((w) => ({ value: `w:${w}`, label: `${w} pt` }))],
+          (v) => (v.startsWith("w:") ? sl.execute("outlineWidth", v.slice(2)) : sl.execute("outline", v)),
+          title,
+        );
+      case "ppt.font": {
+        const fonts = ["+mj-lt", "+mn-lt", "Calibri", "Arial", "Segoe UI", "Georgia", "Times New Roman", "Verdana", "Courier New", "Noto Sans"];
+        const theme = m.masters[0]!.theme;
+        return pick(fonts.map((f) => ({ value: f, label: f === "+mj-lt" ? `${theme.majorFont} (Headings)` : f === "+mn-lt" ? `${theme.minorFont} (Body)` : f, style: f.startsWith("+") ? "" : `font-family:'${f}'` })), (v) => sl.execute("font", v), title);
+      }
+      case "ppt.arrange":
+        return pick(
+          [
+            ["bringToFront", "Bring to Front"],
+            ["bringForward", "Bring Forward"],
+            ["sendBackward", "Send Backward"],
+            ["sendToBack", "Send to Back"],
+            ["group", "Group"],
+            ["ungroup", "Ungroup"],
+          ].map(([v, l]) => ({ value: v!, label: t(`slide.${v}`, {}, l!) })),
+          (v) => sl.execute(v),
+          title,
+        );
+      case "ppt.shapes": {
+        const common = ["rect", "roundRect", "ellipse", "triangle", "rtTriangle", "diamond", "pentagon", "hexagon", "star5", "rightArrow", "leftArrow", "upArrow", "downArrow", "chevron", "heart", "cloud", "wedgeRectCallout", "line", "straightConnector1"];
+        const names = allPresetNames();
+        const rest = names.filter((n) => !common.includes(n));
+        return pick([...common.filter((n) => n === "line" || n === "straightConnector1" || names.includes(n)), ...rest].map((n) => ({ value: n, label: n === "straightConnector1" ? "arrow" : n })), (v) => sl.execute("insertShape", v), title);
+      }
+      case "ppt.table":
+        return pick(["2x2", "3x3", "4x4", "3x5", "5x3", "6x4"].map((v) => ({ value: v, label: v.replace("x", " × ") })), (v) => sl.execute("insertTable", v), title);
+      case "ppt.slideSize":
+        return pick(
+          [
+            { value: "16:9", label: "Widescreen (16:9)", selected: m.width / m.height > 1.5 },
+            { value: "4:3", label: "Standard (4:3)", selected: m.width / m.height <= 1.5 },
+          ],
+          (v) => sl.execute("slideSize", v),
+          title,
+        );
+      case "ppt.background":
+        return pick(
+          [...swatches(t("slide.bgDefault", {}, "Layout default")), ...colors.map(([v, l]) => ({ value: `all:${v}`, label: `${l} — ${t("slide.allSlides", {}, "all slides")}` }))],
+          (v) => sl.execute("background", v),
+          title,
+        );
+      default:
+        return false;
+    }
+  }
+
   private ribbonEnabled = (id: string, phase: number) => {
     if (this.commands.has(id)) return this.commands.isEnabled(id);
     if (id === "doc.tableTools") return !!this.activeEditor?.state().inTable;
@@ -593,6 +725,24 @@ export class Shell {
   };
 
   private ribbonActive = (id: string) => {
+    const sl = this.activeSlides;
+    if (sl?.model) {
+      const st = sl.state();
+      switch (id) {
+        case "ppt.bold": return st.bold;
+        case "ppt.italic": return st.italic;
+        case "ppt.underline": return st.underline;
+        case "ppt.strike": return st.strike;
+        case "ppt.bullets": return st.bullets;
+        case "ppt.numbering": return st.numbering;
+        case "ppt.alignLeft": return st.selection > 0 && (st.align ?? "l") === "l";
+        case "ppt.alignCenter": return st.align === "ctr";
+        case "ppt.alignRight": return st.align === "r";
+        case "ppt.justify": return st.align === "just";
+        case "ppt.hideSlide": return st.hidden;
+        default: return false;
+      }
+    }
     const sh = this.activeSheet;
     if (sh?.wb) {
       const st = sh.state();
@@ -836,6 +986,20 @@ export class Shell {
           },
           onError: (msg) => this.flash(msg, true),
           onAsync: (ed, reqs) => void this.runAsync(ed, reqs),
+        });
+        engine.ready.then(
+          () => engine.focus(),
+          (err) => this.flash(String(err instanceof Error ? err.message : err), true),
+        );
+        view = { el: engine.el, engine };
+      } else if (active.mode === "presentation") {
+        const docId = active.docId;
+        const engine = new SlideEditor(this.host, docId, {
+          onDirty: () => this.tabs.update(docId, { dirty: true }),
+          onState: () => {
+            if (this.tabs.active?.docId === docId && !this.showHub) this.renderRibbon(this.tabs.active);
+          },
+          onError: (msg) => this.flash(msg, true),
         });
         engine.ready.then(
           () => engine.focus(),

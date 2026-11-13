@@ -286,8 +286,8 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
   presentation: [
     FILE_TAB,
     {
-      id: "design",
-      label: "Slide Design",
+      id: "home",
+      label: "Home",
       groups: [
         {
           id: "slides",
@@ -295,10 +295,101 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
           commands: [
             cmd("ppt.newSlide", "New Slide", "▢", 4),
             cmd("ppt.layout", "Layout", "▤", 4),
-            cmd("ppt.theme", "Theme", "◐", 4),
+            cmd("ppt.duplicateSlide", "Duplicate", "⧉", 4),
+            cmd("ppt.deleteSlide", "Delete", "✕", 4),
+            cmd("ppt.hideSlide", "Hide", "◌", 4),
           ],
         },
+        {
+          id: "font",
+          label: "Font",
+          commands: [
+            cmd("ppt.font", "Font", "Aa", 4),
+            cmd("ppt.bold", "Bold", "B", 4),
+            cmd("ppt.italic", "Italic", "I", 4),
+            cmd("ppt.underline", "Underline", "U", 4),
+            cmd("ppt.strike", "Strikethrough", "S", 4),
+            cmd("ppt.grow", "Grow Font", "A↑", 4),
+            cmd("ppt.shrink", "Shrink Font", "A↓", 4),
+            cmd("ppt.color", "Font Color", "A", 4),
+          ],
+        },
+        {
+          id: "paragraph",
+          label: "Paragraph",
+          commands: [
+            cmd("ppt.bullets", "Bullets", "•", 4),
+            cmd("ppt.numbering", "Numbering", "1.", 4),
+            cmd("ppt.alignLeft", "Left", "⇤", 4),
+            cmd("ppt.alignCenter", "Center", "↔", 4),
+            cmd("ppt.alignRight", "Right", "⇥", 4),
+            cmd("ppt.justify", "Justify", "☰", 4),
+          ],
+        },
+        {
+          id: "drawing",
+          label: "Drawing",
+          commands: [cmd("ppt.fill", "Shape Fill", "▆", 4), cmd("ppt.outline", "Outline", "▢", 4), cmd("ppt.arrange", "Arrange", "⧉", 4)],
+        },
+      ],
+    },
+    {
+      id: "insert",
+      label: "Insert",
+      groups: [
+        {
+          id: "insert",
+          label: "Insert",
+          commands: [
+            cmd("ppt.textBox", "Text Box", "T", 4),
+            cmd("ppt.shapes", "Shapes", "◆", 4),
+            cmd("ppt.picture", "Picture", "🖼", 4),
+            cmd("ppt.table", "Table", "▦", 4),
+          ],
+        },
+      ],
+    },
+    {
+      id: "design",
+      label: "Slide Design",
+      groups: [
+        {
+          id: "customize",
+          label: "Customize",
+          commands: [cmd("ppt.slideSize", "Slide Size", "▭", 4), cmd("ppt.background", "Background", "◐", 4), cmd("ppt.theme", "Theme", "◑", 4)],
+        },
         { id: "ai", label: "Copilot", commands: [cmd("ppt.generate", "Generate Deck", "✦", 4)] },
+      ],
+    },
+    {
+      id: "transitions",
+      label: "Transitions",
+      groups: [
+        {
+          id: "transitions",
+          label: "Transitions",
+          commands: [
+            cmd("ppt.transition", "Transition", "⇢", 4),
+            cmd("ppt.morph", "Morph", "⇝", 4),
+            cmd("ppt.fade", "Fade", "◌", 4),
+          ],
+        },
+        {
+          id: "animations",
+          label: "Animations",
+          commands: [cmd("ppt.animate", "Add Animation", "✧", 4), cmd("ppt.timeline", "Animation Timeline", "⏱", 4)],
+        },
+      ],
+    },
+    {
+      id: "slideshow",
+      label: "Slide Show",
+      groups: [
+        {
+          id: "start",
+          label: "Start",
+          commands: [cmd("ppt.showStart", "From Beginning", "▶", 4), cmd("ppt.showCurrent", "From Current", "⏵", 4), cmd("ppt.presenter", "Presenter View", "🖥", 4)],
+        },
       ],
     },
     {
@@ -311,21 +402,6 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
           commands: [
             cmd("ppt.cameo", "Insert Cameo", "◉", 4),
             cmd("ppt.cameoShape", "Frame Shape", "⬭", 4),
-          ],
-        },
-      ],
-    },
-    {
-      id: "transitions",
-      label: "Transitions",
-      groups: [
-        {
-          id: "transitions",
-          label: "Transitions",
-          commands: [
-            cmd("ppt.morph", "Morph", "⇝", 4),
-            cmd("ppt.fade", "Fade", "◌", 4),
-            cmd("ppt.timeline", "Animation Timeline", "⏱", 4),
           ],
         },
       ],

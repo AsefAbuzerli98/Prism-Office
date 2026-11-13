@@ -273,3 +273,47 @@ fn browser_blank_model_matches_template() {
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     assert_eq!(m, shipped, "src/slide/blank.json is stale");
 }
+
+/// Nodes as the TS editor creates them (src/slide/ops.ts) are written as valid PresentationML.
+#[test]
+fn editor_created_nodes_are_written() {
+    let bytes = prism_openxml::templates::blank(prism_openxml::DocumentKind::Presentation)
+        .to_bytes()
+        .unwrap();
+    let (mut m, src) = read_pptx(&bytes).unwrap();
+    let layout = m.masters[0].layouts[1].part.clone();
+    let shapes: Vec<Node> = serde_json::from_value(serde_json::json!([
+        {"type":"shape","id":2,"name":"Title 1","ph":{"kind":"title"},"text":{"paragraphs":[{"runs":[{"t":"text","text":"Editor title"}]}]}},
+        {"type":"shape","id":3,"name":"Content 2","ph":{"idx":1},"text":{"paragraphs":[{}]}},
+        {"type":"shape","id":4,"name":"TextBox 3","textBox":true,"xfrm":{"x":914400,"y":914400,"cx":2743200,"cy":457200},
+         "geom":{"t":"preset","name":"rect"},"fill":{"t":"none"},
+         "text":{"body":{"wrap":"square","autofit":{"t":"shape"}},"paragraphs":[{"runs":[{"t":"text","text":"Box","props":{"bold":true,"size":2400}}]}]}},
+        {"type":"group","id":5,"name":"Group 4","xfrm":{"x":0,"y":3000000,"cx":2000000,"cy":1000000,"child":[0,3000000,2000000,1000000]},"children":[
+            {"type":"shape","id":6,"name":"star5 5","xfrm":{"x":0,"y":3000000,"cx":1000000,"cy":1000000},"geom":{"t":"preset","name":"star5"},
+             "fill":{"t":"solid","color":{"base":{"t":"scheme","v":"accent1"}}},
+             "line":{"width":12700,"fill":{"t":"solid","color":{"base":{"t":"scheme","v":"accent1"},"mods":[{"name":"shade","val":50000}]}}},
+             "text":{"body":{"anchor":"ctr"},"paragraphs":[{"props":{"align":"ctr"}}]}},
+            {"type":"connector","id":7,"name":"line 6","xfrm":{"x":1000000,"y":3000000,"cx":1000000,"cy":1000000},"geom":{"t":"preset","name":"line"},
+             "line":{"width":19050,"fill":{"t":"solid","color":{"base":{"t":"scheme","v":"accent1"}}},"tail":{"type":"triangle"}}}
+        ]},
+        {"type":"frame","id":8,"name":"Table 7","xfrm":{"x":5000000,"y":3000000,"cx":4000000,"cy":1000000},"kind":"table",
+         "table":{"cols":[2000000,2000000],"rows":[[500000,[{"text":{"paragraphs":[{"runs":[{"t":"text","text":"H1"}]}]}},{"text":{"paragraphs":[{}]}}]],
+                                                   [500000,[{"text":{"paragraphs":[{}]}},{"text":{"paragraphs":[{"runs":[{"t":"text","text":"c"}]}]}}]]],
+                  "styleId":"{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}","firstRow":true,"bandRow":true}}
+    ]))
+    .unwrap();
+    m.slides.push(Slide {
+        part: None,
+        layout,
+        shapes: shapes.clone(),
+        background: None,
+        notes: String::new(),
+        hidden: false,
+        transition: None,
+        timing: None,
+    });
+    let out = write_pptx(&m, &src).unwrap();
+    std::fs::write(std::env::temp_dir().join("prism-editor-nodes.pptx"), &out).unwrap();
+    let (m2, _) = read_pptx(&out).unwrap();
+    assert_eq!(m2.slides[1].shapes, shapes);
+}
