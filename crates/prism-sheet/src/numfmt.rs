@@ -366,6 +366,70 @@ fn fill_int(digits: &str, pattern: &[char], grouping: bool) -> String {
     s
 }
 
+/// Closest fraction to `x` (0 ≤ x) with denominator ≤ `max_den`: continued
+/// fractions with the best semiconvergent (O(log max_den), any digit count).
+fn best_rational(x: f64, max_den: i64) -> (i64, i64) {
+    if !x.is_finite() || x <= 0.0 {
+        return (0, 1);
+    }
+    let (mut p0, mut q0, mut p1, mut q1) = (0i64, 1i64, 1i64, 0i64);
+    let mut v = x;
+    for _ in 0..64 {
+        let a = v.floor();
+        if a > i64::MAX as f64 / 2.0 {
+            break;
+        }
+        let a = a as i64;
+        let q2 = a.saturating_mul(q1).saturating_add(q0);
+        if q2 > max_den {
+            // largest semiconvergent that still fits
+            let k = (max_den - q0) / q1.max(1);
+            let (ps, qs) = (
+                k.saturating_mul(p1).saturating_add(p0),
+                k.saturating_mul(q1).saturating_add(q0),
+            );
+            let err = |p: i64, q: i64| (x - p as f64 / q as f64).abs();
+            return if q1 > 0 && (qs == 0 || err(p1, q1) <= err(ps, qs)) {
+                (p1, q1)
+            } else {
+                (ps, qs.max(1))
+            };
+        }
+        let p2 = a.saturating_mul(p1).saturating_add(p0);
+        (p0, q0, p1, q1) = (p1, q1, p2, q2);
+        let f = v - a as f64;
+        if f < 1e-12 {
+            break;
+        }
+        v = 1.0 / f;
+    }
+    if q1 == 0 {
+        (x.round() as i64, 1)
+    } else {
+        (p1, q1)
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn best_rational_matches_brute_force() {
+    for i in 1..2000 {
+        let x = (i as f64 * 0.7548776662).fract();
+        for max in [9i64, 99, 999] {
+            let (p, q) = best_rational(x, max);
+            let e = (x - p as f64 / q as f64).abs();
+            let brute = (1..=max)
+                .map(|d| (x - (x * d as f64).round() / d as f64).abs())
+                .fold(f64::INFINITY, f64::min);
+            assert!(
+                e <= brute + 1e-12,
+                "x={x} max={max}: {p}/{q} err {e} vs {brute}"
+            );
+            assert!(q <= max);
+        }
+    }
+}
+
 fn format_fraction(n: f64, sec: &Section) -> String {
     let slash = sec.toks.iter().position(|t| *t == Tok::Slash).unwrap();
     let den_toks: Vec<&Tok> = sec.toks[slash + 1..]
@@ -379,7 +443,7 @@ fn format_fraction(n: f64, sec: &Section) -> String {
             None
         }
     });
-    let max_den = 10i64.pow(den_toks.len().max(1) as u32) - 1;
+    let max_den = 10i64.pow(den_toks.len().clamp(1, 15) as u32) - 1;
     let has_int = sec.toks[..slash]
         .iter()
         .filter(|t| matches!(t, Tok::Digit(_)))
@@ -398,15 +462,7 @@ fn format_fraction(n: f64, sec: &Section) -> String {
     let (num, den) = if let Some(d) = fixed_den {
         ((frac * d as f64).round() as i64, d)
     } else {
-        let mut best = (0i64, 1i64, f64::INFINITY);
-        for d in 1..=max_den {
-            let nn = (frac * d as f64).round() as i64;
-            let e = (frac - nn as f64 / d as f64).abs();
-            if e < best.2 - 1e-12 {
-                best = (nn, d, e);
-            }
-        }
-        (best.0, best.1)
+        best_rational(frac, max_den)
     };
     let sign = if neg { "-" } else { "" };
     if num == 0 {
@@ -425,9 +481,13 @@ fn format_num(n: f64, sec: &Section, text: Option<&str>) -> String {
     }
     let toks = &sec.toks;
     let pct = toks.iter().filter(|t| **t == Tok::Percent).count() as i32;
-    let point = toks.iter().position(|t| *t == Tok::Point);
     let exp = toks.iter().position(|t| matches!(t, Tok::Exp(_)));
     let mantissa_end = exp.unwrap_or(toks.len());
+    // a decimal point after the exponent (e.g. `00E-0.00`) is literal text, not the mantissa's point
+    let point = toks
+        .iter()
+        .position(|t| *t == Tok::Point)
+        .filter(|p| *p < mantissa_end);
     let int_end = point.unwrap_or(mantissa_end);
     let int_pat: Vec<char> = toks[..int_end]
         .iter()
@@ -692,6 +752,11 @@ mod tests {
         assert_eq!(f(0.256, "0.0%"), "25.6%");
         assert_eq!(f(12345.0, "0.00E+00"), "1.23E+04");
         assert_eq!(f(0.5, "# ?/?"), "1/2");
+        assert_eq!(f(std::f64::consts::PI, "# ???/???"), "3 16/113");
+        assert_eq!(f(0.142857, "?/?"), "1/7");
+        // 11+ denominator digits must not loop or overflow
+        let _ = f(0.123456789, "? ./?##00#0#00");
+        let _ = f(1e300, "?/????????????????????????");
         assert_eq!(f(1.25, "# ?/?"), "1 1/4");
         assert_eq!(f(5.0, "000"), "005");
         assert_eq!(f(1.5, "#.##"), "1.5");

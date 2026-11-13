@@ -260,6 +260,13 @@ impl RecoveryStore {
         let first = !live.contains_key(key);
         if first {
             fs::create_dir_all(&dir)?;
+            // journals hold document content: owner-only on Unix
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&self.root, fs::Permissions::from_mode(0o700));
+                let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
+            }
             write_atomic(&dir.join("base.json"), &serde_json::to_vec(content)?)?;
             File::create(dir.join("journal.jsonl"))?.sync_all()?;
             write_atomic(&dir.join("meta.json"), &serde_json::to_vec(&meta)?)?;

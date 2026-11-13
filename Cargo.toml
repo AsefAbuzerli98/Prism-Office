@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["crates/prism-openxml", "crates/prism-word", "crates/prism-sheet", "crates/prism-drawingml", "crates/prism-slide", "src-tauri"]
+exclude = ["fuzz"]
+members = ["crates/prism-openxml", "crates/prism-word", "crates/prism-sheet", "crates/prism-drawingml", "crates/prism-slide", "crates/prism-fuzz", "src-tauri"]
 default-members = ["crates/prism-openxml", "crates/prism-word", "crates/prism-sheet", "crates/prism-drawingml", "crates/prism-slide"]
 
 [workspace.package]

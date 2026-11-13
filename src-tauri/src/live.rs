@@ -36,7 +36,11 @@ struct Inner {
     changed: Condvar,
     stop: AtomicBool,
     viewers: AtomicUsize,
+    connections: AtomicUsize,
 }
+
+/// Concurrent connections (viewers + image requests) the server accepts.
+const MAX_CONNECTIONS: usize = 300;
 
 pub struct LiveServer {
     inner: Arc<Inner>,
@@ -100,6 +104,7 @@ impl LiveServer {
             changed: Condvar::new(),
             stop: AtomicBool::new(false),
             viewers: AtomicUsize::new(0),
+            connections: AtomicUsize::new(0),
         });
         let url = format!("http://{}:{port}/?t={}", lan_ip(), inner.token);
         let worker = inner.clone();
@@ -110,10 +115,18 @@ impl LiveServer {
             }
             match listener.accept() {
                 Ok((stream, _)) => {
+                    // bounded thread count: each viewer holds one SSE thread
+                    if worker.connections.load(Ordering::Relaxed) >= MAX_CONNECTIONS {
+                        let mut s = stream;
+                        let _ = s.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+                        continue;
+                    }
+                    worker.connections.fetch_add(1, Ordering::Relaxed);
                     let w = worker.clone();
                     std::thread::spawn(move || {
                         let _ = stream.set_nonblocking(false);
                         let _ = handle(stream, &w);
+                        w.connections.fetch_sub(1, Ordering::Relaxed);
                     });
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -195,7 +208,7 @@ fn query<'a>(q: &'a str, key: &str) -> Option<&'a str> {
 fn respond(s: &mut TcpStream, status: &str, ctype: &str, body: &[u8]) -> std::io::Result<()> {
     write!(
         s,
-        "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Frame-Options: DENY\r\nContent-Security-Policy: default-src 'self'; img-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'\r\nConnection: close\r\n\r\n",
         body.len()
     )?;
     s.write_all(body)

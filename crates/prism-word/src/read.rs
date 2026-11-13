@@ -226,7 +226,12 @@ fn parse_num_pr(xml: &str) -> Option<ListRef> {
 
 pub(crate) struct Ctx<'a> {
     pub rels: &'a Relationships,
+    /// Current table nesting (hostile files could otherwise exhaust the stack).
+    pub depth: std::cell::Cell<usize>,
 }
+
+/// Word itself stops at a few dozen nested tables.
+const MAX_TABLE_DEPTH: usize = 64;
 
 #[derive(Clone, Default)]
 struct RunCtx {
@@ -730,6 +735,16 @@ fn parse_sect_pr(reader: &mut Reader<&[u8]>, empty: bool) -> Result<Section> {
 }
 
 fn parse_table(reader: &mut Reader<&[u8]>, ctx: &Ctx<'_>) -> Result<Table> {
+    if ctx.depth.get() >= MAX_TABLE_DEPTH {
+        return Err(Error::xml("tables are nested too deeply"));
+    }
+    ctx.depth.set(ctx.depth.get() + 1);
+    let r = parse_table_inner(reader, ctx);
+    ctx.depth.set(ctx.depth.get() - 1);
+    r
+}
+
+fn parse_table_inner(reader: &mut Reader<&[u8]>, ctx: &Ctx<'_>) -> Result<Table> {
     let mut t = Table::default();
     loop {
         let (e, is_empty) = match reader.read_event().map_err(Error::xml)? {
@@ -934,7 +949,10 @@ pub(crate) fn parse_blocks(reader: &mut Reader<&[u8]>, ctx: &Ctx<'_>) -> Result<
 pub fn read_document(xml: &[u8], rels: &Relationships) -> Result<(Vec<Block>, Section)> {
     let text = std::str::from_utf8(xml).map_err(Error::xml)?;
     let mut reader = Reader::from_str(text);
-    let ctx = Ctx { rels };
+    let ctx = Ctx {
+        rels,
+        depth: Default::default(),
+    };
     let mut blocks = Vec::new();
     let mut section = Section::default();
     let mut in_body = false;

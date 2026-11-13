@@ -1,0 +1,71 @@
+[package]
+name = "prism-fuzz-libfuzzer"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+prism-fuzz = { path = "../crates/prism-fuzz" }
+
+# Not part of the main workspace: needs nightly + `cargo install cargo-fuzz`.
+[workspace]
+
+[[bin]]
+name = "openxml"
+path = "fuzz_targets/openxml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "docx"
+path = "fuzz_targets/docx.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "xlsx"
+path = "fuzz_targets/xlsx.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pptx"
+path = "fuzz_targets/pptx.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "formula"
+path = "fuzz_targets/formula.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "numfmt"
+path = "fuzz_targets/numfmt.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "drawingml"
+path = "fuzz_targets/drawingml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "geometry"
+path = "fuzz_targets/geometry.rs"
+test = false
+doc = false
+bench = false

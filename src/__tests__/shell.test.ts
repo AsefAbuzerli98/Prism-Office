@@ -122,7 +122,7 @@ describe("Shell", () => {
   it("re-renders in Azerbaijani when the locale setting changes", async () => {
     const host = new BrowserHost(localStorage, () => null);
     await make(host);
-    await host.setSettings({ windowing: "tabbed", appearance: "dark", locale: "az" });
+    await host.setSettings({ windowing: "tabbed", appearance: "dark", locale: "az", crashReports: false });
     expect(root.querySelector(".mode-card .mode-title")?.textContent).toBe("Sənəd");
     expect(document.documentElement.dataset.appearance).toBe("dark");
   });
@@ -142,7 +142,7 @@ describe("Shell", () => {
   it("multi-instance topology opens new documents in their own windows", async () => {
     const host = new FakeDesktopHost(localStorage, () => null);
     const shell = await make(host);
-    await host.setSettings({ windowing: "multiInstance", appearance: "system", locale: null });
+    await host.setSettings({ windowing: "multiInstance", appearance: "system", locale: null, crashReports: false });
     await shell.newDocument("document");
     expect(shell.tabs.list()).toHaveLength(0);
     expect(host.opened).toHaveLength(1);

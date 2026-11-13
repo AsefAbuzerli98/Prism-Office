@@ -52,7 +52,10 @@ type NoteLike = Vec<(Vec<(String, String)>, Vec<Block>)>;
 
 fn read_note_like(xml: &str, rels: &Relationships, child: &str) -> Result<NoteLike> {
     let mut r = Reader::from_str(xml);
-    let ctx = Ctx { rels };
+    let ctx = Ctx {
+        rels,
+        depth: Default::default(),
+    };
     let mut out = Vec::new();
     let mut depth = 0;
     loop {
@@ -127,7 +130,10 @@ fn read_root_blocks(pkg: &Package, part: &PartName) -> Result<Vec<Block>> {
     };
     let rels = pkg.relationships(Some(part))?;
     let mut r = Reader::from_str(&xml);
-    let ctx = Ctx { rels: &rels };
+    let ctx = Ctx {
+        rels: &rels,
+        depth: Default::default(),
+    };
     loop {
         match r.read_event().map_err(Error::xml)? {
             Event::Start(_) => return parse_blocks(&mut r, &ctx),

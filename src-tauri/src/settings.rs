@@ -33,6 +33,8 @@ pub struct Settings {
     pub appearance: Appearance,
     /// BCP-47 tag, or `None` to follow the OS.
     pub locale: Option<String>,
+    /// Opt-in: keep local crash reports (never sent anywhere).
+    pub crash_reports: bool,
 }
 
 pub struct SettingsStore {

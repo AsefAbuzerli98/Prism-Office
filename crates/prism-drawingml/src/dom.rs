@@ -4,6 +4,9 @@
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
 
+/// Maximum element nesting accepted by [`El::parse`].
+pub const MAX_DEPTH: usize = 256;
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum XNode {
     El(El),
@@ -56,13 +59,20 @@ impl El {
         }
     }
 
-    /// Parse the first element of an XML fragment or document.
+    /// Parse the first element of an XML fragment or document. Documents
+    /// nested deeper than [`MAX_DEPTH`] are rejected (the tree is walked
+    /// recursively elsewhere; real OOXML stays far below this).
     pub fn parse(xml: &str) -> Option<El> {
         let mut r = Reader::from_str(xml);
         let mut stack: Vec<El> = Vec::new();
         loop {
             match r.read_event().ok()? {
-                Event::Start(e) => stack.push(start(&e)),
+                Event::Start(e) => {
+                    if stack.len() >= MAX_DEPTH {
+                        return None;
+                    }
+                    stack.push(start(&e))
+                }
                 Event::Empty(e) => {
                     let el = start(&e);
                     match stack.last_mut() {

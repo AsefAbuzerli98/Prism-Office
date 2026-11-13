@@ -520,8 +520,22 @@ fn read_shape(e: &El, nv: &str) -> Shape {
     }
 }
 
+/// Groups nested deeper than this are kept as opaque nodes (written back
+/// verbatim) instead of being modelled — protects the stack from hostile files.
+pub const MAX_GROUP_DEPTH: usize = 32;
+
 /// Read one node; `None` for non-node elements (nvGrpSpPr, grpSpPr …).
 pub fn read_node(e: &El) -> Option<Node> {
+    read_node_at(e, 0)
+}
+
+fn read_node_at(e: &El, depth: usize) -> Option<Node> {
+    if e.local() == "grpSp" && depth >= MAX_GROUP_DEPTH {
+        return Some(Node::Other(Other {
+            common: common(e.find("nvGrpSpPr")),
+            tag: "grpSp".into(),
+        }));
+    }
     Some(match e.local() {
         "sp" => Node::Shape(read_shape(e, "nvSpPr")),
         "cxnSp" => Node::Connector(read_shape(e, "nvCxnSpPr")),
@@ -551,7 +565,10 @@ pub fn read_node(e: &El) -> Option<Node> {
             common.xfrm = e.path(&["grpSpPr", "xfrm"]).map(xfrm);
             Node::Group(Group {
                 common,
-                children: e.elements().filter_map(read_node).collect(),
+                children: e
+                    .elements()
+                    .filter_map(|c| read_node_at(c, depth + 1))
+                    .collect(),
             })
         }
         "graphicFrame" => {
@@ -647,17 +664,17 @@ pub type Originals = HashMap<u32, El>;
 /// Read the children of a shape tree (`p:spTree` / `p:grpSp`).
 pub fn read_tree(tree: &El) -> (Vec<Node>, Originals) {
     let mut originals = HashMap::new();
-    fn collect(e: &El, out: &mut Originals) {
+    fn collect(e: &El, out: &mut Originals, depth: usize) {
         for c in e.elements() {
-            if let Some(n) = read_node(c) {
+            if let Some(n) = read_node_at(c, depth) {
                 out.insert(n.common().id, c.clone());
-                if c.local() == "grpSp" {
-                    collect(c, out);
+                if matches!(n, Node::Group(_)) {
+                    collect(c, out, depth + 1);
                 }
             }
         }
     }
-    collect(tree, &mut originals);
+    collect(tree, &mut originals, 0);
     (tree.elements().filter_map(read_node).collect(), originals)
 }
 
@@ -1307,5 +1324,31 @@ mod tests {
         assert!(out[4].to_xml().contains("{5C22544A}"));
         let reread: Vec<Node> = out.iter().filter_map(read_node).collect();
         assert_eq!(reread, edited);
+    }
+}
+
+#[cfg(test)]
+mod depth_tests {
+    use super::*;
+
+    #[test]
+    fn deep_groups_round_trip_verbatim() {
+        let open = "<p:grpSp><p:nvGrpSpPr><p:cNvPr id=\"ID\" name=\"g\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>";
+        let n = 200;
+        let mut xml = String::from("<p:spTree>");
+        for i in 0..n {
+            xml.push_str(&open.replace("ID", &(i + 2).to_string()));
+        }
+        xml.push_str("<p:sp><p:nvSpPr><p:cNvPr id=\"999\" name=\"deep\"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr/></p:sp>");
+        xml.push_str(&"</p:grpSp>".repeat(n));
+        xml.push_str("</p:spTree>");
+        let tree = El::parse(&xml).unwrap();
+        let (nodes, originals) = read_tree(&tree);
+        let out = write_tree("p", &nodes, &originals);
+        let mut wrapped = El::new("p:spTree");
+        for e in out {
+            wrapped.push(e);
+        }
+        assert_eq!(wrapped.to_xml(), tree.to_xml(), "deep content survives");
     }
 }

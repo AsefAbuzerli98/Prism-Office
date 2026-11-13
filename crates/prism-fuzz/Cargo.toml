@@ -1,0 +1,17 @@
+[package]
+name = "prism-fuzz"
+description = "Fuzz targets for the Prism Office parsers (cargo-fuzz on nightly, built-in mutation runner on stable)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+prism-openxml.workspace = true
+prism-word.workspace = true
+prism-sheet.workspace = true
+prism-drawingml.workspace = true
+prism-slide.workspace = true
+serde_json.workspace = true
+zip.workspace = true

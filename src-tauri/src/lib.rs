@@ -5,6 +5,7 @@
 //! commands below and the `prism://event` broadcast channel.
 
 pub mod ai;
+pub mod diagnostics;
 pub mod documents;
 pub mod events;
 pub mod launch;
@@ -15,6 +16,7 @@ pub mod recovery;
 pub mod services;
 pub mod settings;
 mod store;
+pub mod updater;
 pub mod windows;
 
 use std::path::PathBuf;
@@ -63,15 +65,74 @@ async fn query_database(
     .map_err(|e| e.to_string())?
 }
 
+/// Extensions `read_text_file` serves: data-connection sources only, so a
+/// compromised page cannot read arbitrary files (keys, mail, …).
+const TEXT_IMPORT_EXTS: &[&str] = &["csv", "tsv", "txt", "json", "md"];
+
 /// Text file for data import (CSV/JSON), capped at 64 MB.
 #[tauri::command]
 fn read_text_file(path: String) -> Result<String, String> {
-    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    let p = std::path::Path::new(&path);
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if !TEXT_IMPORT_EXTS.contains(&ext.as_str()) {
+        return Err(format!(
+            "only {} files can be imported",
+            TEXT_IMPORT_EXTS.join("/")
+        ));
+    }
+    let meta = std::fs::metadata(p).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("not a file".into());
+    }
     if meta.len() > 64 * 1024 * 1024 {
         return Err("file is larger than 64 MB".into());
     }
-    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let bytes = std::fs::read(p).map_err(|e| e.to_string())?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Front-end errors and events into the structured log (no document content).
+#[tauri::command]
+fn log_event(level: String, target: String, message: String) {
+    let level = match level.as_str() {
+        "error" | "warn" | "info" | "debug" => level,
+        _ => "info".into(),
+    };
+    let message: String = message.chars().take(2000).collect();
+    diagnostics::log(
+        &level,
+        &format!("ui:{}", target.chars().take(40).collect::<String>()),
+        &message,
+        serde_json::Value::Null,
+    );
+}
+
+#[tauri::command]
+fn crash_reports() -> Vec<diagnostics::CrashReport> {
+    diagnostics::dir()
+        .map(|d| diagnostics::crashes(&d))
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn clear_crash_reports() {
+    if let Some(d) = diagnostics::dir() {
+        diagnostics::clear_crashes(&d);
+    }
+}
+
+#[tauri::command]
+async fn update_check(app: tauri::AppHandle) -> Result<updater::UpdateInfo, String> {
+    updater::check(&app).await
+}
+
+#[tauri::command]
+async fn update_install(app: tauri::AppHandle) -> Result<(), String> {
+    updater::install(&app).await
 }
 
 #[tauri::command]
@@ -140,26 +201,72 @@ fn live_subtitle(
     }
 }
 
-/// Write a generated file (video export) chosen in a save dialog. The bytes
-/// travel as a raw IPC body (no base64), the path in the `x-path` header.
+/// Save a generated file (video export). The save dialog runs here in the
+/// host, so the page can only suggest a name — it can never pick the path
+/// (no arbitrary-write primitive for injected script). Raw IPC body, name
+/// and extension in the `x-name` / `x-ext` headers. Returns the chosen path.
 #[tauri::command]
-fn write_binary_file(request: tauri::ipc::Request<'_>) -> Result<(), String> {
+async fn export_file(
+    app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
     let tauri::ipc::InvokeBody::Raw(data) = request.body() else {
         return Err("expected a binary body".into());
     };
-    let path = request
-        .headers()
-        .get("x-path")
-        .and_then(|v| v.to_str().ok())
-        .map(percent_decode)
-        .ok_or("missing x-path header")?;
-    let path = PathBuf::from(path);
+    let header = |h: &str| {
+        request
+            .headers()
+            .get(h)
+            .and_then(|v| v.to_str().ok())
+            .map(percent_decode)
+            .unwrap_or_default()
+    };
+    let name: String = header("x-name")
+        .chars()
+        .filter(|c| !matches!(c, '/' | '\\' | ':' | '\0'))
+        .take(120)
+        .collect();
+    let ext: String = header("x-ext")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(8)
+        .collect();
+    if ext.is_empty() {
+        return Err("missing extension".into());
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog()
+        .file()
+        .set_file_name(if name.is_empty() {
+            format!("export.{ext}")
+        } else {
+            name
+        })
+        .add_filter(ext.to_uppercase(), &[ext.as_str()])
+        .save_file(move |p| {
+            let _ = tx.send(p);
+        });
+    let picked = tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten())
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(fp) = picked else { return Ok(None) };
+    let mut path = fp.into_path().map_err(|e| e.to_string())?;
+    if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        != Some(ext.to_ascii_lowercase())
+    {
+        path.set_extension(&ext);
+    }
     let tmp = path.with_extension("prism-tmp");
     std::fs::write(&tmp, data).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         e.to_string()
-    })
+    })?;
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 /// Decode `%XX` escapes (encodeURIComponent) as UTF-8.
@@ -550,6 +657,7 @@ fn set_settings(
     bus: State<'_, EventBus>,
 ) -> Result<Settings, String> {
     let saved = settings.set(value).map_err(|e| e.to_string())?;
+    diagnostics::set_crash_reports(saved.crash_reports);
     bus.publish(AppEvent::SettingsChanged {
         settings: saved.clone(),
     });
@@ -590,6 +698,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(DocumentRegistry::default())
         .manage(EventBus::default())
         .manage(PendingOpens::default())
@@ -603,9 +712,12 @@ pub fn run() {
                 data_dir.map(|d| d.join("recent.json")),
                 20,
             ));
-            app.manage(SettingsStore::load(
-                config_dir.clone().map(|d| d.join("settings.json")),
-            ));
+            let settings_store =
+                SettingsStore::load(config_dir.clone().map(|d| d.join("settings.json")));
+            if let Ok(log_dir) = app.path().app_log_dir() {
+                diagnostics::init(log_dir, settings_store.get().crash_reports);
+            }
+            app.manage(settings_store);
             let recovery_root = data_dir_for_recovery.map(|d| d.join("recovery"));
             app.manage(recovery::RecoveryStore::new(
                 recovery_root
@@ -678,7 +790,12 @@ pub fn run() {
             get_presentation_model,
             update_presentation_model,
             get_slide_part,
-            write_binary_file,
+            export_file,
+            update_check,
+            log_event,
+            crash_reports,
+            clear_crash_reports,
+            update_install,
             live_start,
             live_stop,
             live_status,

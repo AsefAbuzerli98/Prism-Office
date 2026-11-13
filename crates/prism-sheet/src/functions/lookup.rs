@@ -341,19 +341,31 @@ fn offset(ctx: &mut Ctx, args: &[Expr]) -> Value {
     })
 }
 
+/// A reference expression INDIRECT may evaluate: references, names,
+/// structured refs and ranges between them — never function calls (text
+/// like `A1:INDIRECT(B1)` would otherwise recurse without end).
+fn plain_reference(e: &Expr) -> bool {
+    match e {
+        Expr::Ref(_) | Expr::Name(_) | Expr::Structured { .. } => true,
+        Expr::Binary(crate::parser::BinOp::Range, a, b) => plain_reference(a) && plain_reference(b),
+        _ => false,
+    }
+}
+
 fn indirect(ctx: &mut Ctx, args: &[Expr]) -> Value {
     let t = tryv!(to_text(&arg(ctx, args, 0)));
     let a1 = !present(args, 1) || tryv!(truthy(&arg(ctx, args, 1)));
     match crate::parser::parse_mode(t.trim(), ctx.cell, !a1) {
-        Ok(
-            e @ (Expr::Ref(_)
-            | Expr::Name(_)
-            | Expr::Structured { .. }
-            | Expr::Binary(crate::parser::BinOp::Range, ..)),
-        ) => {
+        Ok(e) if plain_reference(&e) => {
+            // names can lead back here (a name defined as INDIRECT(…)): bound the chain
+            if ctx.depth > 64 {
+                return err(ErrorKind::Ref);
+            }
+            ctx.depth += 1;
             let saved = std::mem::take(&mut ctx.offset);
             let v = ctx.eval(&e);
             ctx.offset = saved;
+            ctx.depth -= 1;
             match v {
                 v @ Value::Ref(_) => v,
                 _ => err(ErrorKind::Ref),

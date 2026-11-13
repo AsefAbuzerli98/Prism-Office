@@ -60,7 +60,41 @@
       }
     ],
     "macOS": {
-      "entitlements": "Entitlements.plist"
+      "entitlements": "Entitlements.plist",
+      "minimumSystemVersion": "11.0",
+      "hardenedRuntime": true
+    },
+    "createUpdaterArtifacts": true,
+    "category": "Productivity",
+    "shortDescription": "Documents, workbooks and presentations in one app",
+    "copyright": "© 2026 Prism Office contributors",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "English",
+          "Azerbaijani"
+        ]
+      },
+      "wix": {
+        "language": [
+          "en-US"
+        ]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/asefabuzerli98/prism-office/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

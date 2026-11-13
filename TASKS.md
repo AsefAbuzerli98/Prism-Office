@@ -108,21 +108,27 @@ Task IDs are stable — reference them in commits/PRs (e.g. `P1-03`).
 
 - [x] **X-01** Local-first auto-recovery: structural JSON-diff journal (splice ops, fsync) every 3 s per modified document, compaction, torn-write tolerance, Hub restore/discard; journals dropped on save or deliberate close.
 - [x] **X-02** AI service daemon: provider trait (Claude Messages API), streaming, refusal fallbacks, retries with retry-after/exponential backoff, key in the OS keychain (0600 file fallback), privacy switch.
-- [ ] **X-03** Telemetry-free crash reporting (opt-in), structured logging.
+- [x] **X-03** Telemetry-free crash reporting (opt-in), structured logging. _(JSON-lines log in the app log directory (5 MB rotation, owner-only, no document content) incl. front-end events; opt-in local crash reports with backtraces from a panic hook. Nothing is ever uploaded; there is no UI yet for browsing reports beyond the host commands)_
 - [ ] **X-04** OpenXML conformance corpus tests (Microsoft 365, Google Workspace, iWork exports).
 
 ## Phase 5 — Cross-Platform Hardening & Release
 
-- [ ] **P5-01** Apple Silicon & Windows ARM64 builds and performance profiling.
-- [ ] **P5-02** Installers: `.dmg` (macOS), `.msi` (Windows) via Tauri bundler.
-- [ ] **P5-03** Code signing & Apple notarization; Windows Authenticode.
-- [ ] **P5-04** Auto-update channel (Tauri updater, signed manifests).
-- [ ] **P5-05** Enterprise security audit (sandbox escape, file parser fuzzing, CSP).
-- [ ] **P5-06** Fuzzing harness for OpenXML parsers (`cargo-fuzz`).
+- [~] **P5-01** Apple Silicon & Windows ARM64 builds and performance profiling. _(the host cross-checks for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-pc-windows-msvc` and `x86_64-pc-windows-msvc`; CI runs on Apple Silicon, Intel macOS and Windows on ARM runners; `cargo run -p prism-fuzz --release --example bench` times open/save of the corpora (Linux x64: DOCX 0.3–2.4 ms open, XLSX ≈0.8 ms, PPTX 3–8 ms). Not built or profiled on real ARM hardware here)_
+- [~] **P5-02** Installers: `.dmg` (macOS), `.msi` (Windows) via Tauri bundler. _(bundle config for dmg/app (universal binary, macOS 11+, hardened runtime) and msi/nsis (x64 + ARM64, WebView2 bootstrapper, en/az installer languages, per-user install) plus a tag-triggered release workflow; no installer has been produced in this environment — the first real build happens on the CI runners)_
+- [~] **P5-03** Code signing & Apple notarization; Windows Authenticode. _(release workflow signs and notarizes with the Apple Developer ID secrets and signs Windows packages (sha256 + RFC 3161 timestamp) from a PFX secret; without the secrets artifacts are unsigned. Needs the owner's certificates)_
+- [~] **P5-04** Auto-update channel (Tauri updater, signed manifests). _(updater plugin with minisign-verified packages, `latest.json` published by the release workflow, Settings → Check for updates / Install and restart. Off until the owner adds the public key to `tauri.conf.json` and the private key as a CI secret)_
+- [x] **P5-05** Enterprise security audit (sandbox escape, file parser fuzzing, CSP). _(see `docs/security-audit.md`: consent before `=PY` code or data connections from files run, no arbitrary file write/read over IPC (host-side save dialog, import extension allowlist), stack-overflow and hang fixes in the parsers, Live server limits and headers, private recovery journals, CSP. Open: Windows Python isolation is a Job Object only, Live Presenting is plain HTTP, no external pentest)_
+- [x] **P5-06** Fuzzing harness for OpenXML parsers (`cargo-fuzz`). _(8 targets in `crates/prism-fuzz` for cargo-fuzz (nightly, `fuzz/`) and a stable structure-aware runner (mutates XML inside the ZIP, catches panics, watchdog for hangs) used in CI; found and fixed 2 panics, 1 hang and 5 stack overflows; crashing inputs are replayed by `cargo test`. libFuzzer itself was not run here (no nightly toolchain))_
 
 ---
 
 ## Progress log
+
+- **2026-11-13** — Phase 5 started: fuzzing (stable runner + cargo-fuzz
+  targets; 8 parser bugs fixed), security audit with IPC hardening and
+  active-content consent, ARM64 cross-checks, release/signing workflow,
+  updater (off until release keys exist), structured logging and opt-in
+  crash reports.
 
 - **2026-11-13** — Phase 4 complete (two items partial): `prism-drawingml` and
   `prism-slide` crates (lossless PPTX), canvas slide renderer on the shared

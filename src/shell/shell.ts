@@ -499,6 +499,9 @@ export class Shell {
       ed.execute("refreshPivots");
       return this.flash(t("sheet.noConnections", {}, "This workbook has no data connections"));
     }
+    const docId = this.tabs.active?.docId;
+    const sources = ed.connections.map((c) => `• ${c.kind}: ${c.source}`).join("\n");
+    if (docId !== undefined && !(await this.allowActiveContent(docId, `${t("security.connections", {}, "data connections")}:\n${sources}`))) return;
     await this.guard(async () => {
       for (const c of ed.connections) {
         let rows: unknown[][];
@@ -934,6 +937,8 @@ export class Shell {
   }
 
   private adoptTab(info: DocumentInfo) {
+    // documents created in this session are trusted; files from disk must ask before running code
+    if (info.path === null && !info.title.includes("(recovered)")) this.trusted.add(info.id);
     this.tabs.open({ docId: info.id, mode: info.kind, title: info.title, path: info.path });
     this.showHub = false;
     this.render();
@@ -1157,8 +1162,34 @@ export class Shell {
     }
   }
 
+  /** Documents whose embedded code / external data may run without asking. */
+  private trusted = new Set<number>();
+  private consent = new Map<number, Promise<boolean>>();
+
+  /** Ask once per document before running code or reading external data it contains. */
+  private allowActiveContent(docId: number, what: string): Promise<boolean> {
+    if (this.trusted.has(docId)) return Promise.resolve(true);
+    let p = this.consent.get(docId);
+    if (!p) {
+      const title = this.tabs.get(docId)?.title ?? "";
+      p = Promise.resolve(window.confirm(t("security.activeContent", { title, what }, `“${title}” contains ${what}. Only allow it if you trust where this file came from.\n\nAllow for this document?`)));
+      this.consent.set(docId, p);
+      void p.then((ok) => {
+        if (ok) this.trusted.add(docId);
+      });
+    }
+    return p;
+  }
+
   /** `=PY` cells: run them in the host's Python sandbox. */
   private async runAsync(ed: SheetEditor, reqs: AsyncRequest[]) {
+    const docId = this.tabs.active?.docId;
+    const py = reqs.filter((r) => r.function === "PY");
+    if (py.length && docId !== undefined && !(await this.allowActiveContent(docId, t("security.python", {}, "Python code (=PY cells)")))) {
+      for (const req of py) ed.supplyAsync(req, { e: "#PYTHON!" });
+      this.flash(t("security.pythonBlocked", {}, "Python cells were not run (not allowed for this document)"), true);
+      return;
+    }
     for (const req of reqs) {
       if (req.function !== "PY") continue;
       try {

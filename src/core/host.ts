@@ -41,9 +41,11 @@ export interface Settings {
   windowing: Windowing;
   appearance: Appearance;
   locale: string | null;
+  /** Opt-in local crash reports (never uploaded). */
+  crashReports: boolean;
 }
 
-export const DEFAULT_SETTINGS: Settings = { windowing: "tabbed", appearance: "system", locale: null };
+export const DEFAULT_SETTINGS: Settings = { windowing: "tabbed", appearance: "system", locale: null, crashReports: false };
 
 export type ServiceState =
   | { state: "stopped" }
@@ -71,6 +73,14 @@ export interface AiStatus {
   /** Privacy switch: false = no document content is sent anywhere. */
   enabled: boolean;
   provider: string;
+}
+
+export interface UpdateInfo {
+  configured: boolean;
+  current: string;
+  available: string | null;
+  notes: string | null;
+  date: string | null;
 }
 
 export interface LiveInfo {
@@ -202,6 +212,11 @@ export interface HostBridge {
 
   pickOpenPath(): Promise<string | null>;
   pickSavePath(kind: Mode, suggested: string): Promise<string | null>;
+  /** Structured diagnostics log (local only, no document content). */
+  logEvent(level: "error" | "warn" | "info", target: string, message: string): void;
+  /** Auto-update (signed releases). */
+  updateCheck(): Promise<UpdateInfo>;
+  updateInstall(): Promise<void>;
   /** Live Presenting: LAN audience server (desktop app only). */
   liveStart(): Promise<LiveInfo>;
   liveStop(): Promise<void>;
@@ -373,6 +388,15 @@ export class TauriHost implements HostBridge {
     const r = await this.api.openDialog({ multiple: false, directory: false, filters: FILE_FILTERS });
     return Array.isArray(r) ? (r[0] ?? null) : r;
   }
+  logEvent(level: "error" | "warn" | "info", target: string, message: string) {
+    void this.api.invoke<void>("log_event", { level, target, message }).catch(() => {});
+  }
+  updateCheck() {
+    return this.api.invoke<UpdateInfo>("update_check");
+  }
+  updateInstall() {
+    return this.api.invoke<void>("update_install");
+  }
   liveStart() {
     return this.api.invoke<LiveInfo>("live_start");
   }
@@ -388,11 +412,9 @@ export class TauriHost implements HostBridge {
   liveSubtitle(text: string, translations: Record<string, string>, finalLine: boolean) {
     return this.api.invoke<void>("live_subtitle", { text, translations, finalLine });
   }
-  async exportFile(suggested: string, filter: { name: string; extensions: string[] }, bytes: Uint8Array) {
-    const path = await this.api.saveDialog({ defaultPath: suggested, filters: [filter] });
-    if (!path) return null;
-    await this.api.invoke<void>("write_binary_file", bytes, { headers: { "x-path": encodeURIComponent(path) } });
-    return path;
+  exportFile(suggested: string, filter: { name: string; extensions: string[] }, bytes: Uint8Array) {
+    // the host shows the save dialog itself; the page only suggests a name
+    return this.api.invoke<string | null>("export_file", bytes, { headers: { "x-name": encodeURIComponent(suggested), "x-ext": filter.extensions[0] ?? "bin" } });
   }
   pickSavePath(kind: Mode, suggested: string) {
     const info = MODES[kind];
@@ -654,6 +676,13 @@ export class BrowserHost implements HostBridge {
     return this.ask("Save as (full path):", suggested)?.trim() || null;
   }
 
+  logEvent() {}
+  async updateCheck(): Promise<UpdateInfo> {
+    return { configured: false, current: "0.1.0-web", available: null, notes: null, date: null };
+  }
+  async updateInstall() {
+    throw new Error("Updates are installed by the desktop app");
+  }
   async liveStart(): Promise<LiveInfo> {
     throw new Error("Live Presenting serves the audience page from the desktop app (not available in the browser preview)");
   }

@@ -50,8 +50,8 @@ describe("BrowserHost", () => {
   it("persists settings with defaults", async () => {
     const storage = memStorage();
     const host = new BrowserHost(storage);
-    expect(await host.getSettings()).toEqual({ windowing: "tabbed", appearance: "system", locale: null });
-    await host.setSettings({ windowing: "tabbed", appearance: "dark", locale: "az" });
+    expect(await host.getSettings()).toEqual({ windowing: "tabbed", appearance: "system", locale: null, crashReports: false });
+    await host.setSettings({ windowing: "tabbed", appearance: "dark", locale: "az", crashReports: false });
     expect((await new BrowserHost(storage).getSettings()).locale).toBe("az");
   });
 
@@ -85,13 +85,13 @@ describe("TauriHost", () => {
     await host.saveDocument(3);
     await host.openDocument("/p.pptx");
     await host.openDocumentWindow(3);
-    await host.setSettings({ windowing: "multiInstance", appearance: "light", locale: null });
+    await host.setSettings({ windowing: "multiInstance", appearance: "light", locale: null, crashReports: false });
     expect((api.invoke as unknown as ReturnType<typeof vi.fn>).mock.calls).toEqual([
       ["new_document", { kind: "presentation" }],
       ["save_document", { id: 3, path: null }],
       ["open_document", { path: "/p.pptx" }],
       ["open_document_window", { id: 3 }],
-      ["set_settings", { value: { windowing: "multiInstance", appearance: "light", locale: null } }],
+      ["set_settings", { value: { windowing: "multiInstance", appearance: "light", locale: null, crashReports: false } }],
     ]);
   });
 

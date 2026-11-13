@@ -9,7 +9,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # macos-latest is Apple Silicon (arm64); windows-11-arm covers Windows on ARM64
+        os: [ubuntu-latest, macos-latest, macos-13, windows-latest, windows-11-arm]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +29,20 @@ jobs:
         if: runner.os == 'Linux'
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+
+  fuzz-smoke:
+    # Stable mutation fuzzer over all parser targets (crates/prism-fuzz); longer runs: fuzz/README.md
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo run -p prism-fuzz --release -- all 240 ${{ github.run_number }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-artifacts
+          path: target/fuzz-artifacts/
 
   frontend:
     runs-on: ubuntu-latest

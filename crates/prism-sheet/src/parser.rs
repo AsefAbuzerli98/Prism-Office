@@ -342,9 +342,9 @@ impl<'a> Lexer<'a> {
                     out.push((pos, Tok::Percent));
                 }
                 b'<' | b'>' => {
-                    let two = &self.src[self.i..(self.i + 2).min(self.s.len())];
-                    let op = if two == "<=" || two == ">=" || two == "<>" {
-                        two
+                    let two = &self.s[self.i..(self.i + 2).min(self.s.len())];
+                    let op = if two == b"<=" || two == b">=" || two == b"<>" {
+                        &self.src[self.i..self.i + 2]
                     } else {
                         &self.src[self.i..self.i + 1]
                     };
@@ -392,9 +392,15 @@ pub fn strip_prefixes(name: &str) -> &str {
     n
 }
 
+/// Excel allows 64 nesting levels and 8,192 characters; deeper input would
+/// only exhaust the stack (parsing and evaluation are recursive).
+const MAX_DEPTH: usize = 128;
+pub const MAX_FORMULA_LEN: usize = 8192;
+
 struct Parser {
     toks: Vec<(usize, Tok)>,
     i: usize,
+    depth: usize,
     base: CellRef,
     r1c1: bool,
 }
@@ -429,7 +435,13 @@ impl Parser {
     }
 
     fn expr(&mut self) -> Result<Expr, ParseError> {
-        self.comparison()
+        self.depth += 1;
+        if self.depth > MAX_DEPTH {
+            return self.err("formula is nested too deeply");
+        }
+        let r = self.comparison();
+        self.depth -= 1;
+        r
     }
 
     fn comparison(&mut self) -> Result<Expr, ParseError> {
@@ -495,7 +507,13 @@ impl Parser {
 
     fn unary(&mut self) -> Result<Expr, ParseError> {
         if let Some(op) = self.eat_op(&["-", "+"]) {
-            let e = self.unary()?;
+            self.depth += 1;
+            if self.depth > MAX_DEPTH {
+                return self.err("formula is nested too deeply");
+            }
+            let e = self.unary();
+            self.depth -= 1;
+            let e = e?;
             return Ok(Expr::Unary(
                 if op == "-" { UnOp::Neg } else { UnOp::Plus },
                 Box::new(e),
@@ -503,8 +521,13 @@ impl Parser {
         }
         if self.peek() == Some(&Tok::At) {
             self.i += 1;
-            let e = self.unary()?;
-            return Ok(Expr::Unary(UnOp::Implicit, Box::new(e)));
+            self.depth += 1;
+            if self.depth > MAX_DEPTH {
+                return self.err("formula is nested too deeply");
+            }
+            let e = self.unary();
+            self.depth -= 1;
+            return Ok(Expr::Unary(UnOp::Implicit, Box::new(e?)));
         }
         self.postfix()
     }
@@ -783,6 +806,12 @@ fn rewrite_trim_refs(src: &str) -> std::borrow::Cow<'_, str> {
 
 pub fn parse_mode(src: &str, base: CellRef, r1c1: bool) -> Result<Expr, ParseError> {
     let src = src.strip_prefix('=').unwrap_or(src);
+    if src.len() > MAX_FORMULA_LEN {
+        return Err(ParseError {
+            pos: MAX_FORMULA_LEN,
+            msg: "formula is longer than 8,192 characters".into(),
+        });
+    }
     let rewritten = rewrite_trim_refs(src);
     let src: &str = &rewritten;
     let toks = Lexer {
@@ -795,6 +824,7 @@ pub fn parse_mode(src: &str, base: CellRef, r1c1: bool) -> Result<Expr, ParseErr
     let mut p = Parser {
         toks,
         i: 0,
+        depth: 0,
         base,
         r1c1,
     };
