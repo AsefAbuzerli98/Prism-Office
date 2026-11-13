@@ -3057,6 +3057,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 
 [[package]]
+name = "prism-drawingml"
+version = "0.1.0"
+dependencies = [
+ "quick-xml",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "prism-office"
 version = "0.1.0"
 dependencies = [
@@ -3105,6 +3115,18 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "prism-slide"
+version = "0.1.0"
+dependencies = [
+ "prism-drawingml",
+ "prism-openxml",
+ "quick-xml",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

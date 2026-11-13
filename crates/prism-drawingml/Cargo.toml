@@ -1,0 +1,20 @@
+[package]
+name = "prism-drawingml"
+description = "Shared DrawingML engine for Prism Office: shapes, preset geometry, colours, fills, lines, effects, text bodies"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = []
+wasm = ["dep:wasm-bindgen"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+quick-xml.workspace = true
+wasm-bindgen = { version = "=0.2.130", optional = true }

@@ -1,0 +1,15 @@
+[package]
+name = "prism-slide"
+description = "PresentationML (PPTX) model, import and export for Prism Office"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+prism-openxml.workspace = true
+prism-drawingml.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+quick-xml.workspace = true
+thiserror.workspace = true
