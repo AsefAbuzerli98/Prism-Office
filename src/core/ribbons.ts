@@ -388,7 +388,7 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
         {
           id: "start",
           label: "Start",
-          commands: [cmd("ppt.showStart", "From Beginning", "▶", 4), cmd("ppt.showCurrent", "From Current", "⏵", 4), cmd("ppt.presenter", "Presenter View", "🖥", 4)],
+          commands: [cmd("ppt.showStart", "From Beginning", "▶", 4), cmd("ppt.showCurrent", "From Current", "⏵", 4), cmd("ppt.presenter", "Presenter View", "🖥", 4), cmd("ppt.live", "Present Live", "📡", 4), cmd("ppt.coach", "Rehearse with Coach", "🎙", 4)],
         },
       ],
     },

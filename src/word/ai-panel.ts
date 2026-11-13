@@ -5,7 +5,7 @@ import { getLocale } from "../core/i18n";
 import { applyDraft, draftRequest, rewriteRequest, wordDiff, type Reference, type Tone } from "./ai";
 import type { WordEditor } from "./editor";
 
-function overlay(root: HTMLElement, label: string, ...children: (HTMLElement | null)[]) {
+export function overlay(root: HTMLElement, label: string, ...children: (HTMLElement | null)[]) {
   document.querySelector(".ai-overlay")?.remove();
   const el = h(
     "div",
@@ -16,7 +16,7 @@ function overlay(root: HTMLElement, label: string, ...children: (HTMLElement | n
   return el;
 }
 
-const errorText = (e: unknown) => String(e instanceof Error ? e.message : e);
+export const errorText = (e: unknown) => String(e instanceof Error ? e.message : e);
 
 export async function openAiSettings(root: HTMLElement, host: HostBridge) {
   const st = await host.aiStatus();

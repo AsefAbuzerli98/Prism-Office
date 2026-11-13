@@ -16,6 +16,9 @@ import { SlideShow } from "../slide/show";
 import { camera } from "../slide/camera";
 import { RecordingStudio } from "../slide/studio";
 import { exportVideo, type Recording } from "../slide/video";
+import { openDeckGenerator } from "../slide/ai-panel";
+import { rehearseWithCoach } from "../slide/coach-panel";
+import { presentLive } from "../slide/live";
 import { ANIMATION_PRESETS } from "../slide/anim";
 import { TRANSITIONS } from "../slide/transition";
 import type { AsyncRequest } from "../sheet/engine";
@@ -341,6 +344,9 @@ export class Shell {
       { ...simple("ppt.showCurrent", "show", "current"), hidden: false, keys: ["Shift+F5"], run: () => this.startShow(ed()?.current ?? 0) },
       { ...simple("ppt.presenter", "show", "presenter"), hidden: false, keys: ["Alt+F5"], run: () => this.startShow(ed()?.current ?? 0, true) },
       { ...simple("ppt.record", "record"), hidden: false, run: () => this.openStudio(false) },
+      { ...simple("ppt.live", "live"), hidden: false, run: () => { const e = ed(); if (e?.model) { e.commitEdit(); void presentLive(this.root, this.host, e.model, e.current, { images: (p) => e.imageSource(p), charts: (p) => e.chartSource(p) }, (m) => this.flash(m, true)); } } },
+      { ...simple("ppt.coach", "coach"), hidden: false, run: () => { const e = ed(); if (e?.model) { e.commitEdit(); void rehearseWithCoach(this.root, e.model, e.current, { images: (p) => e.imageSource(p), charts: (p) => e.chartSource(p) }, (m) => this.flash(m, true)); } } },
+      { ...simple("ppt.generate", "generate"), hidden: false, run: () => { const e = ed(); if (e) openDeckGenerator(this.root, e, this.host); } },
       { ...simple("ppt.teleprompter", "teleprompter"), hidden: false, run: () => this.openStudio(true) },
       { ...simple("ppt.export", "export"), hidden: false, run: () => void this.exportSlidesVideo(1080) },
     );

@@ -384,3 +384,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @keyframes studio-pulse { 50% { box-shadow: 0 0 0 4px rgba(239,68,68,.25); } }
 .studio-clock { min-width: 52px; font-variant-numeric: tabular-nums; font-size: 16px; }
 .studio-timeline { flex: 1 1 100%; height: 76px; width: 100%; border-radius: 8px; }
+.coach-hint { position: absolute; left: 50%; bottom: 32px; transform: translateX(-50%); max-width: 70vw; padding: 10px 16px; border-radius: 12px; background: rgba(28,25,23,.9); color: #fafaf9; font: 15px system-ui, sans-serif; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+.coach-meter { position: absolute; left: 16px; bottom: 16px; width: 120px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.2); overflow: hidden; }
+.coach-meter > span { display: block; height: 100%; width: 0; background: #22c55e; transition: width .1s; }
+.coach-table { border-collapse: collapse; width: 100%; }
+.coach-table th, .coach-table td { text-align: start; padding: 4px 8px; border-bottom: 1px solid var(--border, #e5e7eb); }
+.coach-tips { padding-inline-start: 18px; }
+.coach-tips .tip-good { color: #059669; }
+.coach-transcript { max-height: 200px; overflow: auto; white-space: pre-wrap; }
+.live-qr { display: flex; justify-content: center; padding: 8px; }
+.live-qr svg { width: 260px; height: 260px; border-radius: 8px; }
+.live-url { font: 12px ui-monospace, monospace; word-break: break-all; text-align: center; }
+.live-subtitle { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); max-width: 80vw; padding: 8px 18px; border-radius: 10px; background: rgba(0,0,0,.75); color: #fff; font: 22px system-ui, sans-serif; text-align: center; pointer-events: none; }
+.live-subtitle:empty { display: none; }
+.live-subtitle.interim { color: #d6d3d1; }
+.live-join { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(0,0,0,.85); color: #fff; font: 16px system-ui, sans-serif; }
+.live-join[hidden] { display: none; }
+.live-join svg { width: min(60vh, 420px); height: min(60vh, 420px); border-radius: 12px; }

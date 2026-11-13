@@ -8,6 +8,7 @@ pub mod ai;
 pub mod documents;
 pub mod events;
 pub mod launch;
+pub mod live;
 pub mod python;
 pub mod recent;
 pub mod recovery;
@@ -71,6 +72,72 @@ fn read_text_file(path: String) -> Result<String, String> {
     }
     let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+#[tauri::command]
+fn live_start(live: State<'_, live::LiveState>) -> Result<live::LiveInfo, String> {
+    let mut g = live.0.lock().unwrap();
+    if g.is_none() {
+        *g = Some(live::LiveServer::start().map_err(|e| e.to_string())?);
+    }
+    Ok(g.as_ref().unwrap().info())
+}
+
+#[tauri::command]
+fn live_stop(live: State<'_, live::LiveState>) {
+    if let Some(s) = live.0.lock().unwrap().take() {
+        s.stop();
+    }
+}
+
+#[tauri::command]
+fn live_status(live: State<'_, live::LiveState>) -> live::LiveStatus {
+    live.0
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|s| s.status())
+        .unwrap_or(live::LiveStatus {
+            running: false,
+            url: None,
+            viewers: 0,
+            languages: vec![],
+        })
+}
+
+/// Current slide image for the audience (raw PNG body; `x-slide`, `x-total` headers).
+#[tauri::command]
+fn live_slide(
+    request: tauri::ipc::Request<'_>,
+    live: State<'_, live::LiveState>,
+) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(png) = request.body() else {
+        return Err("expected a PNG body".into());
+    };
+    let num = |h: &str| {
+        request
+            .headers()
+            .get(h)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(0)
+    };
+    if let Some(s) = live.0.lock().unwrap().as_ref() {
+        s.set_slide(num("x-slide"), num("x-total"), png.clone());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn live_subtitle(
+    text: String,
+    translations: std::collections::HashMap<String, String>,
+    final_line: bool,
+    live: State<'_, live::LiveState>,
+) {
+    if let Some(s) = live.0.lock().unwrap().as_ref() {
+        s.set_subtitle(text, translations, final_line);
+    }
 }
 
 /// Write a generated file (video export) chosen in a save dialog. The bytes
@@ -526,6 +593,7 @@ pub fn run() {
         .manage(DocumentRegistry::default())
         .manage(EventBus::default())
         .manage(PendingOpens::default())
+        .manage(live::LiveState::default())
         .setup(|app| {
             let handle = app.handle().clone();
             let data_dir = app.path().app_data_dir().ok();
@@ -611,6 +679,11 @@ pub fn run() {
             update_presentation_model,
             get_slide_part,
             write_binary_file,
+            live_start,
+            live_stop,
+            live_status,
+            live_slide,
+            live_subtitle,
             add_slide_image,
             update_word_document,
             get_word_image,

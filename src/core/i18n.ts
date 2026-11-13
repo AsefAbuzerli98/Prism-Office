@@ -342,6 +342,7 @@ const az: Messages = {
   "ribbon.cmd.ppt.coach": "Çıxış məşqçisi",
   "ribbon.tab.slideshow": "Slayd şousu",
   "ribbon.cmd.ppt.cameoMirror": "Güzgü",
+  "ribbon.cmd.ppt.live": "Canlı təqdimat",
   "ribbon.cmd.ppt.camera": "Kamera",
   "ribbon.group.drawing": "Rəsm",
   "ribbon.group.insert": "Əlavə et",

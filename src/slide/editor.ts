@@ -712,6 +712,25 @@ export class SlideEditor implements EngineView {
     if (typeof requestAnimationFrame !== "undefined") this.cameoRaf = requestAnimationFrame(tick);
   }
 
+  /** Insert AI-generated slides after the current one (or replace all). */
+  insertGenerated(slides: Slide[], replace: boolean) {
+    const m = this.model;
+    if (!m || !slides.length) return;
+    this.commitEdit();
+    this.begin();
+    if (replace) {
+      m.slides = slides;
+      this.current = 0;
+    } else {
+      m.slides.splice(this.current + 1, 0, ...slides);
+      this.current += 1;
+    }
+    this.selection.clear();
+    this.rebuildRail();
+    this.syncNotes();
+    this.changed(true);
+  }
+
   /** Recorded per-slide times become auto-advance timings. */
   applyTimings(perSlide: Map<number, number>) {
     const m = this.model;
