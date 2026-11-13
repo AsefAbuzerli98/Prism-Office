@@ -130,6 +130,8 @@ export class SlideEditor implements EngineView {
   private disposed = false;
   private offCamera: () => void = () => {};
   private cameoRaf = 0;
+  /** Last Recording Studio take (narration, ink, timings) for video export. */
+  recording: import("./video").Recording | null = null;
   /** Animation timeline panel. */
   timelineOpen = false;
   private timeline: HTMLElement | null = null;
@@ -708,6 +710,20 @@ export class SlideEditor implements EngineView {
       this.cameoRaf = requestAnimationFrame(tick);
     };
     if (typeof requestAnimationFrame !== "undefined") this.cameoRaf = requestAnimationFrame(tick);
+  }
+
+  /** Recorded per-slide times become auto-advance timings. */
+  applyTimings(perSlide: Map<number, number>) {
+    const m = this.model;
+    if (!m) return;
+    this.begin();
+    for (const [i, ms] of perSlide) {
+      const s = m.slides[i];
+      if (!s) continue;
+      s.transition = { ...(s.transition ?? { kind: "cut" }), advanceClick: true, advanceAfter: Math.round(ms) };
+    }
+    this.rebuildRail();
+    this.changed(true);
   }
 
   /** Picture element for a part (slideshow shares the editor's image cache). */

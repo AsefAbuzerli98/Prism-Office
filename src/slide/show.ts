@@ -12,6 +12,7 @@ import { drawSlide, renderSlideToCanvas, type RenderOptions, type ShapeAnim } fr
 import { resolveShape, slideContext } from "./resolve";
 import { EMU_PER_PT } from "./text";
 import { camera, isCameo } from "./camera";
+import { Teleprompter } from "./teleprompter";
 import { drawMorph, drawTransition, transitionDuration, type Raster } from "./transition";
 
 export interface ShowOptions {
@@ -25,6 +26,12 @@ export interface ShowOptions {
   host?: HTMLElement;
   /** Request browser full screen (default true outside tests). */
   fullscreen?: boolean;
+  /** Open the teleprompter in the presenter view. */
+  teleprompter?: boolean;
+  /** Navigation log: a slide was entered (step -1) or a build step played. */
+  onNavigate?: (slide: number, step: number) => void;
+  /** Extra painting on the audience canvas (ink): ctx maps slide points. */
+  overlay?: (ctx: CanvasRenderingContext2D, slide: number) => void;
 }
 
 const pt = (emu: number) => emu / EMU_PER_PT;
@@ -86,6 +93,7 @@ export class SlideShow {
           btn("◀", "Previous (←)", () => this.prev()),
           btn("▶", "Next (→ / Space)", () => this.next()),
           btn("■", "Black screen (B)", () => this.toggleScreen("black")),
+          btn("☰", "Teleprompter (T)", () => this.toggleTeleprompter()),
           btn("A+", "Larger notes", () => this.notesSize(1)),
           btn("A−", "Smaller notes", () => this.notesSize(-1)),
           btn("✕", "End show (Esc)", () => this.exit()),
@@ -93,7 +101,7 @@ export class SlideShow {
       );
       current.addEventListener("click", () => this.next());
     } else {
-      this.el = h("div", { class: "slideshow", role: "application", "aria-label": "Slide show", tabindex: "0" }, this.main);
+      this.el = h("div", { class: `slideshow${opts.host ? " embedded" : ""}`, role: "application", "aria-label": "Slide show", tabindex: "0" }, this.main);
       this.el.addEventListener("click", (e) => (e.button === 0 ? this.next() : undefined));
       this.el.addEventListener("contextmenu", (e) => {
         e.preventDefault();
@@ -117,6 +125,7 @@ export class SlideShow {
       document.addEventListener("fullscreenchange", this.onFsChange);
     }
     this.enterSlide(null);
+    if (this.opts.teleprompter && this.presenterEls) this.toggleTeleprompter();
     this.tickTimer();
   }
 
@@ -134,6 +143,7 @@ export class SlideShow {
     window.removeEventListener("resize", this.onResizeBound);
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
     this.audience?.win.close();
+    this.teleprompter?.dispose();
     this.el.remove();
     this.opts.onExit?.(this.order[this.pos] ?? 0);
   }
@@ -202,6 +212,7 @@ export class SlideShow {
   private enterSlide(from: { slide: Slide; raster: Raster | null } | null) {
     const s = this.slide;
     if (!s) return;
+    this.opts.onNavigate?.(this.slideIndex, -1);
     this.steps = buildSteps(s.timing);
     this.step = -1;
     this.anim = null;
@@ -231,6 +242,7 @@ export class SlideShow {
 
   private playStep(i: number) {
     this.step = i;
+    if (!(i === 0 && this.steps[0]?.auto)) this.opts.onNavigate?.(this.slideIndex, i);
     this.anim = { step: i, start: performance.now() };
     this.loop();
     this.updatePresenter();
@@ -280,6 +292,8 @@ export class SlideShow {
     this.pos--;
     this.steps = buildSteps(this.slide?.timing);
     this.step = this.steps.length - 1;
+    this.opts.onNavigate?.(this.slideIndex, -1);
+    for (let i = 0; i <= this.step; i++) if (!(i === 0 && this.steps[0]?.auto)) this.opts.onNavigate?.(this.slideIndex, i);
     this.updatePresenter();
     this.draw();
   }
@@ -295,6 +309,20 @@ export class SlideShow {
   toggleScreen(mode: "black" | "white") {
     this.screen = this.screen === mode ? "normal" : mode;
     this.draw();
+  }
+
+  teleprompter: Teleprompter | null = null;
+
+  toggleTeleprompter() {
+    if (this.teleprompter) {
+      this.teleprompter.dispose();
+      this.teleprompter = null;
+      return;
+    }
+    const tp = new Teleprompter({ onClose: () => this.toggleTeleprompter() });
+    tp.setText(this.slide?.notes ?? "");
+    this.el.append(tp.el);
+    this.teleprompter = tp;
   }
 
   private notesSize(d: number) {
@@ -318,6 +346,7 @@ export class SlideShow {
     else if (k === "End") this.goTo(this.order[this.order.length - 1] ?? 0);
     else if (k === "b" || k === "B" || k === ".") this.toggleScreen("black");
     else if (k === "w" || k === "W" || k === ",") this.toggleScreen("white");
+    else if ((k === "t" || k === "T") && this.presenterEls) this.toggleTeleprompter();
     else if (k === "Escape" || k === "-") this.exit();
     else handled = false;
     if (!/^[0-9]$/.test(k) && k !== "Enter") this.jump = "";
@@ -421,7 +450,12 @@ export class SlideShow {
     }
     ctx.setTransform(k, 0, 0, k, ox, oy);
     drawSlide(ctx, this.model, slide, this.renderOpts(this.model.slides.indexOf(slide), anim ?? undefined));
+    if (withTransition) this.opts.overlay?.(ctx, this.model.slides.indexOf(slide));
+    if (canvas === this.main) this.view = { k: k / dpr, ox: ox / dpr, oy: oy / dpr };
   }
+
+  /** Slide-point mapping of the main canvas in CSS px (ink input). */
+  view = { k: 1, ox: 0, oy: 0 };
 
   draw() {
     if (this.disposed) return;
@@ -448,6 +482,10 @@ export class SlideShow {
     const p = this.presenterEls;
     if (!p) return;
     p.notes.textContent = this.slide?.notes || "No notes for this slide.";
+    if (this.teleprompter && this.teleprompter.el.dataset.slide !== String(this.slideIndex)) {
+      this.teleprompter.el.dataset.slide = String(this.slideIndex);
+      this.teleprompter.setText(this.slide?.notes ?? "");
+    }
     p.notes.classList.toggle("empty", !this.slide?.notes);
     const built = this.steps.length ? ` · build ${Math.max(0, this.step + 1)}/${this.steps.length}` : "";
     p.counter.textContent = `Slide ${this.pos + 1} of ${this.order.length}${built}`;

@@ -73,6 +73,47 @@ fn read_text_file(path: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// Write a generated file (video export) chosen in a save dialog. The bytes
+/// travel as a raw IPC body (no base64), the path in the `x-path` header.
+#[tauri::command]
+fn write_binary_file(request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let tauri::ipc::InvokeBody::Raw(data) = request.body() else {
+        return Err("expected a binary body".into());
+    };
+    let path = request
+        .headers()
+        .get("x-path")
+        .and_then(|v| v.to_str().ok())
+        .map(percent_decode)
+        .ok_or("missing x-path header")?;
+    let path = PathBuf::from(path);
+    let tmp = path.with_extension("prism-tmp");
+    std::fs::write(&tmp, data).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })
+}
+
+/// Decode `%XX` escapes (encodeURIComponent) as UTF-8.
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 #[tauri::command]
 fn python_status() -> python::PyStatus {
     python::status()
@@ -569,6 +610,7 @@ pub fn run() {
             get_presentation_model,
             update_presentation_model,
             get_slide_part,
+            write_binary_file,
             add_slide_image,
             update_word_document,
             get_word_image,

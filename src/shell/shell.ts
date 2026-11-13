@@ -14,6 +14,8 @@ import { SlideEditor } from "../slide/editor";
 import { allPresetNames } from "../slide/engine";
 import { SlideShow } from "../slide/show";
 import { camera } from "../slide/camera";
+import { RecordingStudio } from "../slide/studio";
+import { exportVideo, type Recording } from "../slide/video";
 import { ANIMATION_PRESETS } from "../slide/anim";
 import { TRANSITIONS } from "../slide/transition";
 import type { AsyncRequest } from "../sheet/engine";
@@ -338,7 +340,58 @@ export class Shell {
       { ...simple("ppt.showStart", "show", "start"), hidden: false, keys: ["F5"], run: () => this.startShow(0) },
       { ...simple("ppt.showCurrent", "show", "current"), hidden: false, keys: ["Shift+F5"], run: () => this.startShow(ed()?.current ?? 0) },
       { ...simple("ppt.presenter", "show", "presenter"), hidden: false, keys: ["Alt+F5"], run: () => this.startShow(ed()?.current ?? 0, true) },
+      { ...simple("ppt.record", "record"), hidden: false, run: () => this.openStudio(false) },
+      { ...simple("ppt.teleprompter", "teleprompter"), hidden: false, run: () => this.openStudio(true) },
+      { ...simple("ppt.export", "export"), hidden: false, run: () => void this.exportSlidesVideo(1080) },
     );
+  }
+
+  /** Recording Studio for the active presentation. */
+  openStudio(teleprompter: boolean) {
+    const ed = this.activeSlides;
+    if (!ed?.model) return;
+    ed.commitEdit();
+    const studio = new RecordingStudio(ed.model, {
+      start: ed.current,
+      teleprompter,
+      recording: ed.recording,
+      images: (p) => ed.imageSource(p),
+      charts: (p) => ed.chartSource(p),
+      onSaveTimings: (m) => ed.applyTimings(m),
+      onExport: (rec) => void this.exportSlidesVideo(1080, rec),
+      onClose: (rec) => {
+        ed.recording = rec;
+        ed.focus();
+      },
+    });
+    void studio.open();
+  }
+
+  /** Render the deck (and the last recorded take) to MP4. */
+  async exportSlidesVideo(height: 1080 | 2160, rec?: Recording | null) {
+    const ed = this.activeSlides;
+    const tab = this.tabs.active;
+    if (!ed?.model || !tab) return;
+    ed.commitEdit();
+    await this.guard(async () => {
+      let last = -1;
+      const bytes = await exportVideo(ed.model!, {
+        height,
+        recording: rec ?? ed.recording,
+        images: (p) => ed.imageSource(p),
+        charts: (p) => ed.chartSource(p),
+        onProgress: (d, n) => {
+          const pct = Math.floor((d / n) * 100);
+          if (pct >= last + 10) {
+            last = pct;
+            this.flash(t("slide.exporting", { pct }, `Exporting video… ${pct}%`));
+          }
+        },
+      });
+      const name = `${tab.title.replace(/\.[^.]+$/, "")}.mp4`;
+      const saved = await this.host.exportFile(name, { name: "MP4 video", extensions: ["mp4"] }, bytes);
+      if (saved) this.flash(t("slide.exported", { name: saved }, `Video saved: ${saved}`));
+    });
   }
 
   /** Run the slideshow of the active presentation (presenter view optional). */
@@ -758,6 +811,15 @@ export class Shell {
           );
         });
         return true;
+      case "ppt.export":
+        return pick(
+          [
+            { value: "1080", label: "MP4 — Full HD (1080p)" },
+            { value: "2160", label: "MP4 — 4K (2160p)" },
+          ],
+          (v) => void this.exportSlidesVideo(v === "2160" ? 2160 : 1080),
+          title,
+        );
       case "ppt.table":
         return pick(["2x2", "3x3", "4x4", "3x5", "5x3", "6x4"].map((v) => ({ value: v, label: v.replace("x", " × ") })), (v) => sl.execute("insertTable", v), title);
       case "ppt.slideSize":

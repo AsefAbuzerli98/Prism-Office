@@ -386,6 +386,8 @@ const az: Messages = {
   "slide.group": "Qruplaşdır",
   "slide.ungroup": "Qrupu ayır",
   "slide.bgDefault": "Maketin fonu",
+  "slide.exporting": "Video ixrac olunur… {pct}%",
+  "slide.exported": "Video yadda saxlandı: {name}",
   "slide.allSlides": "bütün slaydlar",
 };
 
