@@ -54,14 +54,32 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
       label: "Typography",
       groups: [
         {
+          id: "clipboard",
+          label: "Clipboard",
+          commands: [
+            cmd("doc.undo", "Undo", "↶", 2),
+            cmd("doc.redo", "Redo", "↷", 2),
+            cmd("doc.copyFormat", "Copy Formatting", "¶", 2),
+            cmd("doc.pasteFormat", "Paste Formatting", "¶", 2),
+          ],
+        },
+        {
           id: "font",
           label: "Font",
           commands: [
+            cmd("doc.font", "Font", "Aa", 2),
             cmd("doc.bold", "Bold", "B", 2),
             cmd("doc.italic", "Italic", "I", 2),
             cmd("doc.underline", "Underline", "U", 2),
             cmd("doc.strike", "Strikethrough", "S̶", 2),
-            cmd("doc.font", "Font", "Aa", 2),
+            cmd("doc.subscript", "Subscript", "x₂", 2),
+            cmd("doc.superscript", "Superscript", "x²", 2),
+            cmd("doc.grow", "Grow Font", "A↑", 2),
+            cmd("doc.shrink", "Shrink Font", "A↓", 2),
+            cmd("doc.highlight", "Highlight", "▆", 2),
+            cmd("doc.color", "Font Color", "A", 2),
+            cmd("doc.changeCase", "Change Case", "Aa", 2),
+            cmd("doc.clearFormat", "Clear Formatting", "A", 2),
           ],
         },
         {
@@ -70,10 +88,25 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
           commands: [
             cmd("doc.bullets", "Bullets", "•", 2),
             cmd("doc.numbering", "Numbering", "1.", 2),
-            cmd("doc.align", "Align", "≡", 2),
+            cmd("doc.outdent", "Decrease Indent", "⇤", 2),
+            cmd("doc.indent", "Increase Indent", "⇥", 2),
+            cmd("doc.alignLeft", "Align Left", "≡", 2),
+            cmd("doc.alignCenter", "Center", "≡", 2),
+            cmd("doc.alignRight", "Align Right", "≡", 2),
+            cmd("doc.justify", "Justify", "≡", 2),
+            cmd("doc.lineSpacing", "Line Spacing", "L", 2),
           ],
         },
         { id: "styles", label: "Styles", commands: [cmd("doc.styles", "Styles", "¶", 2)] },
+        {
+          id: "editing",
+          label: "Editing",
+          commands: [
+            cmd("doc.find", "Find", "⌕", 2),
+            cmd("doc.replace", "Replace", "⇄", 2),
+            cmd("doc.selectAll", "Select All", "▭", 2),
+          ],
+        },
       ],
     },
     {
@@ -88,7 +121,7 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
         {
           id: "illustrations",
           label: "Illustrations",
-          commands: [cmd("doc.picture", "Picture", "🖼", 2), cmd("doc.pictureTools", "Picture Tools", "⤢", 2), cmd("doc.ink", "Ink", "✎", 2)],
+          commands: [cmd("doc.picture", "Picture", "P", 2), cmd("doc.pictureTools", "Picture Tools", "⤢", 2), cmd("doc.ink", "Ink", "I", 2)],
         },
         {
           id: "header-footer",
@@ -130,9 +163,9 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
           id: "sources",
           label: "Citations",
           commands: [
-            cmd("doc.citation", "Citation", "❝", 2),
-            cmd("doc.sources", "Sources", "📚", 2),
-            cmd("doc.bibliography", "Bibliography", "☰", 2),
+            cmd("doc.citation", "Citation", "C", 2),
+            cmd("doc.sources", "Sources", "S", 2),
+            cmd("doc.bibliography", "Bibliography", "B", 2),
           ],
         },
         {
@@ -149,7 +182,7 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
         {
           id: "tracking",
           label: "Tracking",
-          commands: [cmd("doc.trackChanges", "Track Changes", "✎", 2), cmd("doc.markup", "Show Markup", "◐", 2)],
+          commands: [cmd("doc.trackChanges", "Track Changes", "T", 2), cmd("doc.markup", "Show Markup", "◐", 2)],
         },
         {
           id: "changes",
@@ -165,9 +198,9 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
         {
           id: "comments",
           label: "Comments",
-          commands: [cmd("doc.comment", "New Comment", "💬", 2), cmd("doc.comments", "Comments Pane", "🗨", 2)],
+          commands: [cmd("doc.comment", "New Comment", "N", 2), cmd("doc.comments", "Comments Pane", "C", 2)],
         },
-        { id: "check", label: "Check", commands: [cmd("doc.accessibility", "Accessibility", "♿", 2)] },
+        { id: "check", label: "Check", commands: [cmd("doc.accessibility", "Accessibility", "A", 2)] },
       ],
     },
     {
@@ -182,7 +215,7 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
         {
           id: "ai",
           label: "AI Agent",
-          commands: [cmd("doc.agent", "Draft with Agent", "✦", 2), cmd("doc.rewrite", "Rewrite", "✎", 2), cmd("doc.aiSettings", "AI Settings", "⚙", 2)],
+          commands: [cmd("doc.agent", "Draft with Agent", "D", 2), cmd("doc.rewrite", "Rewrite", "R", 2), cmd("doc.aiSettings", "AI Settings", "A", 2)],
         },
       ],
     },
@@ -196,7 +229,7 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
         {
           id: "clipboard",
           label: "Clipboard",
-          commands: [cmd("xl.paste", "Paste", "📋", 3), cmd("xl.copy", "Copy", "⧉", 3), cmd("xl.cut", "Cut", "✂", 3), cmd("xl.undo", "Undo", "↶", 3), cmd("xl.redo", "Redo", "↷", 3)],
+          commands: [cmd("xl.paste", "Paste", "P", 3), cmd("xl.copy", "Copy", "⧉", 3), cmd("xl.cut", "Cut", "C", 3), cmd("xl.undo", "Undo", "↶", 3), cmd("xl.redo", "Redo", "↷", 3)],
         },
         {
           id: "font",
@@ -213,13 +246,13 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
         {
           id: "alignment",
           label: "Alignment",
-          commands: [cmd("xl.alignLeft", "Left", "⇤", 3), cmd("xl.alignCenter", "Center", "↔", 3), cmd("xl.alignRight", "Right", "⇥", 3), cmd("xl.wrap", "Wrap Text", "↩", 3)],
+          commands: [cmd("xl.alignLeft", "Left", "⇤", 3), cmd("xl.alignCenter", "Center", "C", 3), cmd("xl.alignRight", "Right", "⇥", 3), cmd("xl.wrap", "Wrap Text", "W", 3)],
         },
         { id: "number", label: "Number", commands: [cmd("xl.numfmt", "Number Format", "#", 3), cmd("xl.percent", "Percent", "%", 3)] },
         {
           id: "cells",
           label: "Cells",
-          commands: [cmd("xl.autoSum", "AutoSum", "Σ", 3), cmd("xl.freeze", "Freeze Panes", "❄", 3), cmd("xl.addSheet", "New Sheet", "＋", 3)],
+          commands: [cmd("xl.autoSum", "AutoSum", "Σ", 3), cmd("xl.freeze", "Freeze Panes", "F", 3), cmd("xl.addSheet", "New Sheet", "＋", 3)],
         },
       ],
     },
@@ -232,7 +265,7 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
           label: "Get Data",
           commands: [
             cmd("xl.importCsv", "From CSV", "⇲", 3),
-            cmd("xl.importSql", "From SQL", "⛁", 3),
+            cmd("xl.importSql", "From SQL", "F", 3),
             cmd("xl.refresh", "Refresh All", "↻", 3),
           ],
         },
@@ -262,8 +295,8 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
           id: "py",
           label: "Python in Cells",
           commands: [
-            cmd("xl.py", "Insert =PY", "🐍", 3),
-            cmd("xl.pyEnv", "Environment", "⚙", 3),
+            cmd("xl.py", "Insert =PY", "I", 3),
+            cmd("xl.pyEnv", "Environment", "E", 3),
           ],
         },
       ],
@@ -277,7 +310,7 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
           label: "Pivot",
           commands: [
             cmd("xl.pivotTable", "PivotTable", "▦", 3),
-            cmd("xl.chart", "Chart", "📈", 3),
+            cmd("xl.chart", "Chart", "C", 3),
           ],
         },
       ],
@@ -321,9 +354,9 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
             cmd("ppt.bullets", "Bullets", "•", 4),
             cmd("ppt.numbering", "Numbering", "1.", 4),
             cmd("ppt.alignLeft", "Left", "⇤", 4),
-            cmd("ppt.alignCenter", "Center", "↔", 4),
+            cmd("ppt.alignCenter", "Center", "C", 4),
             cmd("ppt.alignRight", "Right", "⇥", 4),
-            cmd("ppt.justify", "Justify", "☰", 4),
+            cmd("ppt.justify", "Justify", "J", 4),
           ],
         },
         {
@@ -343,7 +376,7 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
           commands: [
             cmd("ppt.textBox", "Text Box", "T", 4),
             cmd("ppt.shapes", "Shapes", "◆", 4),
-            cmd("ppt.picture", "Picture", "🖼", 4),
+            cmd("ppt.picture", "Picture", "P", 4),
             cmd("ppt.table", "Table", "▦", 4),
           ],
         },
@@ -358,7 +391,7 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
           label: "Customize",
           commands: [cmd("ppt.slideSize", "Slide Size", "▭", 4), cmd("ppt.background", "Background", "◐", 4), cmd("ppt.theme", "Theme", "◑", 4)],
         },
-        { id: "ai", label: "Copilot", commands: [cmd("ppt.generate", "Generate Deck", "✦", 4)] },
+        { id: "ai", label: "Copilot", commands: [cmd("ppt.generate", "Generate Deck", "G", 4)] },
       ],
     },
     {
@@ -377,7 +410,7 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
         {
           id: "animations",
           label: "Animations",
-          commands: [cmd("ppt.animate", "Add Animation", "✧", 4), cmd("ppt.timeline", "Animation Timeline", "⏱", 4)],
+          commands: [cmd("ppt.animate", "Add Animation", "A", 4), cmd("ppt.timeline", "Animation Timeline", "A", 4)],
         },
       ],
     },
@@ -388,7 +421,7 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
         {
           id: "start",
           label: "Start",
-          commands: [cmd("ppt.showStart", "From Beginning", "▶", 4), cmd("ppt.showCurrent", "From Current", "⏵", 4), cmd("ppt.presenter", "Presenter View", "🖥", 4), cmd("ppt.live", "Present Live", "📡", 4), cmd("ppt.coach", "Rehearse with Coach", "🎙", 4)],
+          commands: [cmd("ppt.showStart", "From Beginning", "F", 4), cmd("ppt.showCurrent", "From Current", "F", 4), cmd("ppt.presenter", "Presenter View", "P", 4), cmd("ppt.live", "Present Live", "P", 4), cmd("ppt.coach", "Rehearse with Coach", "R", 4)],
         },
       ],
     },
@@ -400,10 +433,10 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
           id: "cameo",
           label: "Cameo",
           commands: [
-            cmd("ppt.cameo", "Insert Cameo", "◉", 4),
-            cmd("ppt.cameoShape", "Frame Shape", "⬭", 4),
-            cmd("ppt.cameoMirror", "Mirror", "⇋", 4),
-            cmd("ppt.camera", "Camera", "📷", 4),
+            cmd("ppt.cameo", "Insert Cameo", "I", 4),
+            cmd("ppt.cameoShape", "Frame Shape", "F", 4),
+            cmd("ppt.cameoMirror", "Mirror", "M", 4),
+            cmd("ppt.camera", "Camera", "C", 4),
           ],
         },
       ],
@@ -416,9 +449,9 @@ export const RIBBONS: Record<Mode, RibbonTab[]> = {
           id: "record",
           label: "Record",
           commands: [
-            cmd("ppt.record", "Record", "⏺", 4),
-            cmd("ppt.teleprompter", "Teleprompter", "☰", 4),
-            cmd("ppt.export", "Export MP4", "🎞", 4),
+            cmd("ppt.record", "Record", "R", 4),
+            cmd("ppt.teleprompter", "Teleprompter", "T", 4),
+            cmd("ppt.export", "Export MP4", "E", 4),
           ],
         },
       ],

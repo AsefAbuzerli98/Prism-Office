@@ -5,6 +5,7 @@
  * changes, comments, pictures and fields.
  */
 import { h } from "../core/dom";
+import { t } from "../core/i18n";
 import type { HostBridge } from "../core/host";
 import { blocksToHtml, blocksToText, htmlToBlocks, textToBlocks } from "./clipboard";
 import { containerBlocks, mapAllBlocks, pruneOrphans, withContainerBlocks } from "./containers";
@@ -19,8 +20,8 @@ import {
   type Align, type Block, type Inline, type Marks, type NoteKind, type Paragraph, type Revision, type Source, type Table, type WordDocument,
 } from "./model";
 import {
-  applyMarks, blockLength, clampPos, comparePos, deleteRange, insertBlocks, insertInline, insertText, isCollapsed, marksAt,
-  ordered, rangeHasMark, sliceBlocks, splitInlines, splitParagraph, stepPos, updateParagraphs, wordBoundary, type Pos, type Selection,
+  applyMarks, blockLength, clampPos, comparePos, deleteRange, insertBlocks, insertInline, insertText, isCollapsed, mapText, marksAt,
+  ordered, paragraphText, rangeHasMark, sliceBlocks, splitInlines, splitParagraph, stepPos, updateParagraphs, wordBoundary, type Pos, type Selection,
 } from "./ops";
 import { createBackend, PageCache, type Backend, type Tile } from "./compositor";
 import { pageOrigin, paint, paintOverlay, paintPage, totalHeight, type Rect } from "./render";
@@ -61,6 +62,9 @@ export interface EditorOptions {
 
 const collapsedAt = (p: Pos): Selection => ({ anchor: p, focus: p });
 
+/** Word's Grow/Shrink Font steps (points). */
+const FONT_STEPS = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
+
 export class WordEditor implements EngineView {
   readonly el: HTMLElement;
   doc: WordDocument | null = null;
@@ -91,6 +95,12 @@ export class WordEditor implements EngineView {
   readonly side: HTMLElement;
   private readonly measurer: Measurer;
   private pendingMarks: Marks | null = null;
+  /** Character formatting held by Copy Formatting (Mod+Shift+C). */
+  private formatClip: Marks | null = null;
+  private findBar: HTMLElement | null = null;
+  get hasFormatClip(): boolean {
+    return this.formatClip !== null;
+  }
   private typingRevision: Revision | null = null;
   private goalX: number | null = null;
   private composing = false;
@@ -1327,6 +1337,67 @@ export class WordEditor implements EngineView {
       case "markdown":
         this.toggleMarkdown();
         break;
+      case "grow":
+      case "shrink":
+      case "growPt":
+      case "shrinkPt": {
+        const now = this.state().size;
+        const next =
+          command === "growPt" ? now + 1 : command === "shrinkPt" ? Math.max(1, now - 1) : command === "grow" ? (FONT_STEPS.find((x) => x > now) ?? now + 10) : ([...FONT_STEPS].reverse().find((x) => x < now) ?? Math.max(1, now - 1));
+        this.setMarks({ size: Math.round(next * 2) });
+        break;
+      }
+      case "vertAlign": {
+        const want = arg as Marks["vertAlign"];
+        const [a] = ordered(this.selection);
+        const p = this.blocks[a.block];
+        const cur = isCollapsed(this.selection) ? this.typingMarks().vertAlign : p && isParagraph(p) ? marksAt(p, a.offset + 1).vertAlign : undefined;
+        this.setMarks({ vertAlign: cur === want ? undefined : want });
+        break;
+      }
+      case "clearFormat":
+        this.setMarks({ bold: undefined, italic: undefined, underline: undefined, strike: undefined, font: undefined, size: undefined, color: undefined, highlight: undefined, vertAlign: undefined, style: undefined });
+        break;
+      case "lineSpacing":
+        this.updateParagraphs((p) => ({ ...p, line: Number(arg) === 240 ? undefined : Number(arg) }));
+        break;
+      case "changeCase": {
+        if (isCollapsed(this.selection)) return false;
+        const [a, b] = ordered(this.selection);
+        const text = sliceBlocks(this.blocks, a, b)
+          .filter(isParagraph)
+          .flatMap((p) => p.inlines)
+          .map((i) => (i.type === "text" ? i.text : ""))
+          .join("");
+        const lower = text.toLocaleLowerCase();
+        const upper = text.toLocaleUpperCase();
+        // Word's cycle: lower → UPPER → Capitalize Each Word → lower
+        const fn =
+          text === lower ? (s: string) => s.toLocaleUpperCase() : text === upper ? (s: string) => s.toLocaleLowerCase().replace(/(^|[\s\-–—("'])(\p{L})/gu, (_m, p1: string, c: string) => p1 + c.toLocaleUpperCase()) : (s: string) => s.toLocaleLowerCase();
+        // keep word starts correct across inline boundaries: map the whole range in one pass
+        const mapped = fn(text);
+        let at = 0;
+        this.commit("format", mapText(this.blocks, a, b, (s) => {
+          const out = mapped.slice(at, at + s.length);
+          at += s.length;
+          return out;
+        }), this.selection);
+        break;
+      }
+      case "copyFormat": {
+        const [a] = ordered(this.selection);
+        const p = this.blocks[a.block];
+        const { link: _l, revision: _r, extra: _x, ...m } = p && isParagraph(p) ? marksAt(p, isCollapsed(this.selection) ? a.offset : a.offset + 1) : ({} as Marks);
+        this.formatClip = m;
+        break;
+      }
+      case "pasteFormat":
+        if (!this.formatClip) return false;
+        this.setMarks({ bold: undefined, italic: undefined, underline: undefined, strike: undefined, font: undefined, size: undefined, color: undefined, highlight: undefined, vertAlign: undefined, ...this.formatClip });
+        break;
+      case "find":
+        this.openFind(arg === "replace");
+        return true;
       default:
         return false;
     }
@@ -1348,6 +1419,8 @@ export class WordEditor implements EngineView {
       italic: has("italic"),
       underline: has("underline"),
       strike: has("strike"),
+      vertAlign: (collapsed ? marks!.vertAlign : para ? marksAt(para, a.offset + 1).vertAlign : undefined) ?? null,
+      line: para?.line ?? 240,
       style: para?.style ?? "Normal",
       align: para?.align ?? "left",
       list: para?.list?.numId ?? null,
@@ -1362,6 +1435,133 @@ export class WordEditor implements EngineView {
       hyphenation: !!this.doc?.settings?.autoHyphenation,
       columns: this.doc?.section.columns?.count ?? 1,
     };
+  }
+
+  // ---- find and replace -------------------------------------------------------------------
+
+  /** Every match of `query` in the current story (body or container), in order. */
+  findAll(query: string, matchCase = false): { block: number; offset: number }[] {
+    if (!query) return [];
+    const q = matchCase ? query : query.toLocaleLowerCase();
+    const out: { block: number; offset: number }[] = [];
+    this.blocks.forEach((b, block) => {
+      if (!isParagraph(b)) return;
+      const text = matchCase ? paragraphText(b) : paragraphText(b).toLocaleLowerCase();
+      for (let i = text.indexOf(q); i >= 0; i = text.indexOf(q, i + q.length)) out.push({ block, offset: i });
+    });
+    return out;
+  }
+
+  /** Select the next (or previous) match after the selection; returns its index or -1. */
+  findNext(query: string, dir: 1 | -1 = 1, matchCase = false): number {
+    const hits = this.findAll(query, matchCase);
+    if (!hits.length) return -1;
+    const [a, b] = ordered(this.selection);
+    let i = -1;
+    if (dir > 0) i = hits.findIndex((x) => comparePos(x, b) >= 0 && !(comparePos(x, a) === 0 && !isCollapsed(this.selection)));
+    else for (let j = hits.length - 1; j >= 0 && i < 0; j--) if (comparePos(hits[j]!, a) < 0) i = j;
+    if (i < 0) i = dir > 0 ? 0 : hits.length - 1;
+    const x = hits[i]!;
+    this.setSelection({ anchor: x, focus: { block: x.block, offset: x.offset + query.length } });
+    this.scheduleRender();
+    return i;
+  }
+
+  /** Replace the selected match (if the selection is one) and move to the next. */
+  replaceNext(query: string, replacement: string, matchCase = false): number {
+    const [a, b] = ordered(this.selection);
+    const p = this.blocks[a.block];
+    if (a.block === b.block && p && isParagraph(p)) {
+      const sel = paragraphText(p).slice(a.offset, b.offset);
+      if (sel && (matchCase ? sel === query : sel.toLocaleLowerCase() === query.toLocaleLowerCase())) this.insertText(replacement, "replace");
+    }
+    return this.findNext(query, 1, matchCase);
+  }
+
+  /** Replace every match; returns how many were replaced. */
+  replaceAll(query: string, replacement: string, matchCase = false): number {
+    const hits = this.findAll(query, matchCase);
+    // back to front so earlier offsets stay valid; one undo step
+    let blocks = this.blocks;
+    for (const x of [...hits].reverse()) {
+      const end = { block: x.block, offset: x.offset + query.length };
+      const marks = (() => {
+        const p = blocks[x.block];
+        if (!p || !isParagraph(p)) return {};
+        const { revision: _r, ...m } = marksAt(p, x.offset + 1);
+        return m;
+      })();
+      let r = deleteRange(blocks, x, end);
+      if (replacement) r = insertText(r.blocks, r.pos, replacement, marks, this.nextStyleOf);
+      blocks = r.blocks;
+    }
+    if (hits.length) this.commit("replace", blocks, collapsedAt(clampPos(blocks, this.selection.focus)));
+    return hits.length;
+  }
+
+  /** Show the find bar (Mod+F) or find-and-replace bar (Mod+H). */
+  openFind(replace: boolean) {
+    if (!this.findBar) this.findBar = this.buildFindBar();
+    const bar = this.findBar;
+    bar.hidden = false;
+    bar.classList.toggle("with-replace", replace);
+    const q = bar.querySelector<HTMLInputElement>(".find-query")!;
+    const [a, b] = ordered(this.selection);
+    const p = this.blocks[a.block];
+    if (!isCollapsed(this.selection) && a.block === b.block && p && isParagraph(p)) q.value = paragraphText(p).slice(a.offset, b.offset);
+    q.focus();
+    q.select();
+    q.dispatchEvent(new Event("input"));
+  }
+
+  private buildFindBar(): HTMLElement {
+    const query = h("input", { class: "find-query", type: "search", placeholder: t("find.find"), "aria-label": t("find.find") });
+    const repl = h("input", { class: "find-replace", type: "text", placeholder: t("find.replaceWith"), "aria-label": t("find.replaceWith") });
+    const matchCase = h("input", { type: "checkbox" });
+    const count = h("span", { class: "find-count", "aria-live": "polite" });
+    const opt = () => matchCase.checked;
+    const update = (i = -1) => {
+      const n = this.findAll(query.value, opt()).length;
+      count.textContent = !query.value ? "" : n === 0 ? t("find.none") : i >= 0 ? t("find.nOfM", { n: i + 1, m: n }) : t("find.count", { m: n });
+      count.classList.toggle("none", !!query.value && n === 0);
+    };
+    const next = (dir: 1 | -1) => update(this.findNext(query.value, dir, opt()));
+    const close = () => {
+      bar.hidden = true;
+      this.focus();
+    };
+    query.addEventListener("input", () => update());
+    query.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        next(e.shiftKey ? -1 : 1);
+      } else if (e.key === "Escape") close();
+    });
+    repl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        update(this.replaceNext(query.value, repl.value, opt()));
+      } else if (e.key === "Escape") close();
+    });
+    matchCase.addEventListener("change", () => update());
+    const btn = (label: string, title: string, fn: () => void, cls = "") => h("button", { class: `btn btn-quiet ${cls}`, type: "button", title, onclick: fn }, label);
+    const bar = h(
+      "div",
+      { class: "find-bar", role: "search", hidden: true },
+      h("div", { class: "find-row" }, query, count, btn("↑", t("find.prev"), () => next(-1)), btn("↓", t("find.next"), () => next(1)), h("label", { class: "find-case" }, matchCase, t("find.matchCase")), btn("×", t("find.close"), close, "find-close")),
+      h(
+        "div",
+        { class: "find-row find-replace-row" },
+        repl,
+        btn(t("find.replace"), t("find.replace"), () => update(this.replaceNext(query.value, repl.value, opt()))),
+        btn(t("find.replaceAll"), t("find.replaceAll"), () => {
+          const n = this.replaceAll(query.value, repl.value, opt());
+          count.textContent = t("find.replaced", { m: n });
+        }),
+      ),
+    );
+    this.el.append(bar);
+    return bar;
   }
 
   // ---- side panel (comments) ----------------------------------------------------------------
@@ -1691,20 +1891,63 @@ export class WordEditor implements EngineView {
         return this.insertInlineAtCaret({ type: "tab", marks: this.typingMarks() }, "type");
       }
     }
+    const done = (fn: () => unknown) => {
+      e.preventDefault();
+      e.stopPropagation();
+      fn();
+      this.scheduleRender();
+    };
+    if (e.key === "F3" && e.shiftKey && !mod) return done(() => this.execute("changeCase"));
+    // Word: Ctrl+Alt+1/2/3 headings, Ctrl+Alt+F footnote, Ctrl+Alt+D endnote
+    if (mod && e.altKey && !e.shiftKey) {
+      const heading = /^Digit([1-3])$/.exec(e.code);
+      if (heading) return done(() => this.execute("style", `Heading${heading[1]}`));
+      if (e.code === "KeyF") return done(() => this.execute("footnote"));
+      if (e.code === "KeyD") return done(() => this.execute("endnote"));
+    }
     if (!mod || e.altKey) return;
     const k = e.key.toLowerCase();
-    const map: Record<string, () => void> = {
-      b: () => this.toggleMark("bold"),
-      i: () => this.toggleMark("italic"),
-      u: () => this.toggleMark("underline"),
-      a: () => this.selectAll(),
-      z: () => (e.shiftKey ? this.redo() : this.undo()),
-      y: () => this.redo(),
-      e: () => this.execute("align", "center"),
-      l: () => this.execute("align", "left"),
-      r: () => this.execute("align", "right"),
-      j: () => this.execute("align", "justify"),
-    };
+    // keys whose character depends on Shift (and the layout): match the physical key too
+    const code = e.code;
+    const map: Record<string, () => void> = e.shiftKey
+      ? {
+          z: () => this.redo(),
+          ">": () => this.execute("grow"),
+          "<": () => this.execute("shrink"),
+          "+": () => this.execute("vertAlign", "superscript"),
+          l: () => this.execute("bullets"),
+          m: () => this.execute("outdent"),
+          n: () => this.execute("style", "Normal"),
+          c: () => this.execute("copyFormat"),
+          v: () => this.execute("pasteFormat"),
+        }
+      : {
+          b: () => this.toggleMark("bold"),
+          i: () => this.toggleMark("italic"),
+          u: () => this.toggleMark("underline"),
+          a: () => this.selectAll(),
+          z: () => this.undo(),
+          y: () => this.redo(),
+          e: () => this.execute("align", "center"),
+          l: () => this.execute("align", "left"),
+          r: () => this.execute("align", "right"),
+          j: () => this.execute("align", "justify"),
+          m: () => this.execute("indent"),
+          "]": () => this.execute("growPt"),
+          "[": () => this.execute("shrinkPt"),
+          "=": () => this.execute("vertAlign", "subscript"),
+          " ": () => this.execute("clearFormat"),
+          "1": () => this.execute("lineSpacing", "240"),
+          "2": () => this.execute("lineSpacing", "480"),
+          "5": () => this.execute("lineSpacing", "360"),
+          f: () => this.openFind(false),
+          h: () => this.openFind(true),
+        };
+    if (e.shiftKey && !map[k]) {
+      if (code === "Period") map[k] = map[">"]!;
+      else if (code === "Comma") map[k] = map["<"]!;
+      else if (code === "Equal") map[k] = map["+"]!;
+    }
     const fn = map[k];
     if (fn) {
       e.preventDefault();

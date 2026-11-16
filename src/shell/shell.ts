@@ -28,6 +28,7 @@ import { openSqlDialog } from "../sheet/connect-dialog";
 import { IMPLEMENTED_PHASE } from "../core/ribbons";
 import { openPicker } from "./picker";
 import { openSourcesDialog } from "./sources-dialog";
+import { openShortcuts } from "./shortcuts-dialog";
 import { openAgentDialog, openAiSettings, openRewriteDialog } from "../word/ai-panel";
 import { openInkOverlay } from "../word/ink";
 import { isCollapsed } from "../word/ops";
@@ -234,7 +235,11 @@ export class Shell {
       { id: "file.new", title: () => t("cmd.file.new"), keys: ["Mod+N"], when: notDocWindow, run: () => this.goHub() },
       { id: "file.open", title: () => t("cmd.file.open"), keys: ["Mod+O"], run: () => this.openDialog() },
       { id: "file.save", title: () => t("cmd.file.save"), keys: ["Mod+S"], when: hasTab, run: () => this.save(false) },
-      { id: "file.saveAs", title: () => t("cmd.file.saveAs"), keys: ["Mod+Shift+S"], when: hasTab, run: () => this.save(true) },
+      { id: "file.saveAs", title: () => t("cmd.file.saveAs"), keys: ["Mod+Shift+S", "F12"], when: hasTab, run: () => this.save(true) },
+      { id: "app.shortcuts", title: () => t("cmd.app.shortcuts"), keys: ["F1", "Mod+/"], run: () => openShortcuts(this.root, this.showHub ? "hub" : (this.tabs.active?.mode ?? "hub")) },
+      // Word Ctrl+D (Font) and Excel Ctrl+1 (Format Cells) open the same pickers as the ribbon
+      { id: "doc.fontDialog", title: () => t("ribbon.cmd.doc.font", {}, "Font"), keys: ["Mod+D"], hidden: true, when: () => this.activeEditor?.doc != null, run: () => void this.pickerCommand("doc.font", this.anchorFor("doc.font")) },
+      { id: "xl.formatCells", title: () => t("ribbon.cmd.xl.numfmt", {}, "Number Format"), keys: ["Mod+1"], hidden: true, when: () => this.activeSheet != null, run: () => void this.pickerCommand("xl.numfmt", this.anchorFor("xl.numfmt")) },
       { id: "file.close", title: () => t("cmd.file.close"), keys: ["Mod+W"], when: hasTab, run: () => this.close(this.tabs.active!.docId) },
       { id: "view.hub", title: () => t("cmd.view.hub"), keys: ["Mod+T"], when: notDocWindow, run: () => this.goHub() },
       {
@@ -542,10 +547,29 @@ export class Shell {
       simple("doc.underline", "underline"),
       simple("doc.strike", "strike"),
       simple("doc.align", "alignCycle"),
+      simple("doc.undo", "undo"),
+      simple("doc.redo", "redo"),
+      simple("doc.copyFormat", "copyFormat"),
+      { ...simple("doc.pasteFormat", "pasteFormat"), when: () => !!ed()?.doc && ed()!.hasFormatClip },
+      simple("doc.subscript", "vertAlign", "subscript"),
+      simple("doc.superscript", "vertAlign", "superscript"),
+      simple("doc.grow", "grow"),
+      simple("doc.shrink", "shrink"),
+      simple("doc.clearFormat", "clearFormat"),
+      { ...simple("doc.changeCase", "changeCase"), when: () => !!ed()?.doc && !isCollapsedSel(ed()!) },
+      simple("doc.outdent", "outdent"),
+      simple("doc.indent", "indent"),
+      simple("doc.alignLeft", "align", "left"),
+      simple("doc.alignCenter", "align", "center"),
+      simple("doc.alignRight", "align", "right"),
+      simple("doc.justify", "align", "justify"),
+      simple("doc.find", "find"),
+      simple("doc.replace", "find", "replace"),
+      simple("doc.selectAll", "selectAll"),
       simple("doc.bullets", "bullets"),
       simple("doc.numbering", "numbering"),
       simple("doc.pageBreak", "pageBreak"),
-      { ...simple("doc.markdown", "markdown"), hidden: false, keys: ["Mod+Shift+M"] },
+      { ...simple("doc.markdown", "markdown"), hidden: false, keys: ["Mod+Alt+Shift+M"] },
       { ...simple("doc.orientation", "orientation") },
       simple("doc.picture", "insertImage"),
       simple("doc.header", "header"),
@@ -569,6 +593,11 @@ export class Shell {
       { id: "doc.ink", title: () => t("ribbon.cmd.doc.ink", {}, "Ink"), when: () => !!this.activeEditor?.doc, run: () => { const ed = this.activeEditor; if (ed) openInkOverlay(ed, this.host); } },
       { ...simple("doc.comment", "comment"), when: () => !!this.activeEditor?.doc && !isCollapsedSel(this.activeEditor), keys: ["Mod+Alt+M"] },
     );
+  }
+
+  /** Where a keyboard-opened picker appears: its ribbon button, else the sheet's corner. */
+  private anchorFor(id: string): HTMLElement {
+    return this.root.querySelector<HTMLElement>(`[data-cmd="${id}"]`) ?? this.root.querySelector<HTMLElement>(".workspace") ?? this.root;
   }
 
   /** Ribbon commands that need an anchored picker. */
@@ -629,6 +658,21 @@ export class Shell {
           (v) => ed.execute("style", v),
           t("word.styles"),
         );
+        return true;
+      }
+      case "doc.highlight": {
+        const marks: [string, string, string][] = [["yellow", "#ffff00", t("color.yellow", {}, "Yellow")], ["green", "#00ff00", t("color.green", {}, "Green")], ["cyan", "#00ffff", t("color.cyan", {}, "Cyan")], ["magenta", "#ff00ff", t("color.magenta", {}, "Magenta")], ["lightGray", "#c0c0c0", t("color.gray", {}, "Gray")], ["", "", t("sheet.none", {}, "None")]];
+        openPicker(anchor, marks.map(([v, c, l]) => ({ value: v, label: l, style: c ? `border-left:14px solid ${c};padding-left:6px` : "" })), (v) => ed.execute("highlight", v), t("ribbon.cmd.doc.highlight", {}, "Highlight"));
+        return true;
+      }
+      case "doc.color": {
+        const colors: [string, string][] = [["", t("color.auto", {}, "Automatic")], ["#C00000", t("color.red", {}, "Red")], ["#E97132", t("color.orange", {}, "Orange")], ["#BF8F00", t("color.gold", {}, "Gold")], ["#3A7D22", t("color.green", {}, "Green")], ["#0F6FC6", t("color.blue", {}, "Blue")], ["#1F3864", t("color.navy", {}, "Navy")], ["#7F7F7F", t("color.gray", {}, "Gray")]];
+        openPicker(anchor, colors.map(([v, l]) => ({ value: v, label: l, style: `border-left:14px solid ${v || "#000"};padding-left:6px` })), (v) => ed.execute("color", v), t("ribbon.cmd.doc.color", {}, "Font Color"));
+        return true;
+      }
+      case "doc.lineSpacing": {
+        const spacing: [string, string][] = [["240", "1.0"], ["276", "1.15"], ["360", "1.5"], ["480", "2.0"], ["600", "2.5"], ["720", "3.0"]];
+        openPicker(anchor, spacing.map(([v, l]) => ({ value: v, label: l, selected: String(st.line) === v })), (v) => ed.execute("lineSpacing", v), t("ribbon.cmd.doc.lineSpacing", {}, "Line Spacing"));
         return true;
       }
       case "doc.font": {
@@ -858,7 +902,7 @@ export class Shell {
     if (id === "doc.rewrite") return !!this.activeEditor?.doc && !isCollapsedSel(this.activeEditor);
     if (id === "doc.agent" || id === "doc.aiSettings") return this.activeEditor?.doc != null;
     if (id === "doc.pictureTools") return !!this.activeEditor?.state().object;
-    if (["doc.styles", "doc.font", "doc.margins", "doc.orientation", "doc.table", "doc.columns", "doc.sources", "doc.citation"].includes(id)) return this.activeEditor?.doc != null;
+    if (["doc.styles", "doc.font", "doc.highlight", "doc.color", "doc.lineSpacing", "doc.margins", "doc.orientation", "doc.table", "doc.columns", "doc.sources", "doc.citation"].includes(id)) return this.activeEditor?.doc != null;
     return phase <= IMPLEMENTED_PHASE;
   };
 
@@ -909,6 +953,12 @@ export class Shell {
       case "doc.italic": return st.italic;
       case "doc.underline": return st.underline;
       case "doc.strike": return st.strike;
+      case "doc.subscript": return st.vertAlign === "subscript";
+      case "doc.superscript": return st.vertAlign === "superscript";
+      case "doc.alignLeft": return st.align === "left";
+      case "doc.alignCenter": return st.align === "center";
+      case "doc.alignRight": return st.align === "right";
+      case "doc.justify": return st.align === "justify";
       case "doc.bullets": return st.list === 9001;
       case "doc.numbering": return st.list === 9002;
       case "doc.markdown": return ed.markdownVisible;

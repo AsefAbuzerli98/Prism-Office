@@ -512,21 +512,18 @@ export class SlideEditor implements EngineView {
         this.downgradeCompositor(err);
       }
     }
-    if (composited) {
-      // drop shadow outside the slide (the slide itself is on the GPU layer)
-      octx.fillStyle = "rgba(0,0,0,.18)";
-      octx.fillRect(v.ox + W, v.oy + 3, 2, H);
-      octx.fillRect(v.ox + 2, v.oy + H, W, 3);
-    } else {
+    if (!composited) {
       octx.fillStyle = "#f4f6f8";
       octx.fillRect(0, 0, vw, vh);
-      octx.fillStyle = "rgba(0,0,0,.18)";
-      octx.fillRect(v.ox + 2, v.oy + 3, W, H);
       octx.save();
       octx.setTransform(dpr * v.k, 0, 0, dpr * v.k, dpr * v.ox, dpr * v.oy);
       paintSlide(octx);
       octx.restore();
     }
+    // a hairline edge round the slide, so a white slide reads against the stage
+    octx.strokeStyle = "rgba(19,20,22,.16)";
+    octx.lineWidth = 1;
+    octx.strokeRect(Math.round(v.ox) - 0.5, Math.round(v.oy) - 0.5, Math.round(W) + 1, Math.round(H) + 1);
     this.drawChrome(octx);
     this.status.textContent = `Slide ${this.current + 1} of ${m.slides.length}  ·  ${Math.round(v.k * 100)}%`;
   }
@@ -1150,6 +1147,13 @@ export class SlideEditor implements EngineView {
     else if (mod && k.toLowerCase() === "d") this.execute("duplicate");
     else if (mod && k.toLowerCase() === "g") this.execute(e.shiftKey ? "ungroup" : "group");
     else if (mod && k.toLowerCase() === "m") this.execute("newSlide");
+    else if (mod && e.shiftKey && (k === ">" || e.code === "Period")) this.execute("grow");
+    else if (mod && e.shiftKey && (k === "<" || e.code === "Comma")) this.execute("shrink");
+    else if (mod && !e.shiftKey && k.toLowerCase() === "e") this.execute("alignCenter");
+    else if (mod && !e.shiftKey && k.toLowerCase() === "l") this.execute("alignLeft");
+    else if (mod && !e.shiftKey && k.toLowerCase() === "r") this.execute("alignRight");
+    else if (mod && !e.shiftKey && k.toLowerCase() === "j") this.execute("justify");
+    else if (mod && (k === "ArrowUp" || k === "ArrowDown") && !this.selection.size) this.execute(k === "ArrowUp" ? "moveSlideUp" : "moveSlideDown");
     else if (mod && k.toLowerCase() === "b") this.execute("bold");
     else if (mod && k.toLowerCase() === "i") this.execute("italic");
     else if (mod && k.toLowerCase() === "u") this.execute("underline");
@@ -1274,12 +1278,21 @@ export class SlideEditor implements EngineView {
         e.preventDefault();
         this.commitEdit();
         this.scroll.focus();
-      } else if (mod && ["b", "i", "u"].includes(e.key.toLowerCase())) {
+      } else if (mod && !e.shiftKey && !e.altKey && "biuelrj".includes(e.key.toLowerCase()) && e.key.length === 1) {
         e.preventDefault();
-        this.execute({ b: "bold", i: "italic", u: "underline" }[e.key.toLowerCase()]!);
+        this.execute({ b: "bold", i: "italic", u: "underline", e: "alignCenter", l: "alignLeft", r: "alignRight", j: "justify" }[e.key.toLowerCase()]!);
+      } else if (mod && e.shiftKey && (e.key === ">" || e.code === "Period")) {
+        e.preventDefault();
+        this.execute("grow");
+      } else if (mod && e.shiftKey && (e.key === "<" || e.code === "Comma")) {
+        e.preventDefault();
+        this.execute("shrink");
       } else if (e.key === "Tab" && !o.cell) {
         e.preventDefault();
         this.execute(e.shiftKey ? "outdent" : "indent");
+      } else if (mod && !e.defaultPrevented && !["a", "c", "v", "x", "z", "y"].includes(e.key.toLowerCase())) {
+        // app shortcuts (save, open, palette…) still reach the shell while typing
+        return;
       }
       e.stopPropagation();
     });

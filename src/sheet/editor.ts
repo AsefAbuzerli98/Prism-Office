@@ -379,7 +379,10 @@ export class SheetEditor implements EngineView {
         this.syncEditors(source);
         return;
       }
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        this.commitFill();
+      } else if (e.key === "Enter") {
         e.preventDefault();
         this.commit(e.shiftKey ? -1 : 1, 0);
       } else if (e.key === "Tab") {
@@ -688,11 +691,36 @@ export class SheetEditor implements EngineView {
       case "ArrowRight":
         return move(0, 1);
       case "PageDown":
+        if (mod) break;
         return move(page, 0);
       case "PageUp":
+        if (mod) break;
         return move(-page, 0);
       case "Home":
         return move(mod ? -this.active.r : 0, -(e.shiftKey ? this.extent.c : this.active.c));
+      case "End": {
+        if (!mod) break;
+        // Ctrl+End: the last cell of the used range
+        const used = this.info[this.sheet]?.used;
+        const from = e.shiftKey ? this.extent : this.active;
+        return move((used?.r1 ?? 0) - from.r, (used?.c1 ?? 0) - from.c);
+      }
+      case " ":
+        if (mod === e.shiftKey) break;
+        e.preventDefault();
+        // Ctrl+Space selects the column, Shift+Space the row
+        if (mod) {
+          this.anchor = { r: 0, c: this.selection.c0 };
+          this.extent = { r: MAX_ROWS - 1, c: this.selection.c1 };
+        } else {
+          this.anchor = { r: this.selection.r0, c: 0 };
+          this.extent = { r: this.selection.r1, c: MAX_COLS - 1 };
+        }
+        return this.selectionChanged();
+      case "F11":
+        if (e.shiftKey || mod) break;
+        e.preventDefault();
+        return void this.execute("chart");
       case "Enter":
         return this.moveWithin(e.shiftKey ? -1 : 1, 0, e);
       case "Tab":
@@ -711,14 +739,49 @@ export class SheetEditor implements EngineView {
         e.preventDefault();
         this.execute(cmd);
       };
-      if (k === "z") return run(e.shiftKey ? "redo" : "undo");
+      if (e.key === "PageUp" || e.key === "PageDown") {
+        e.preventDefault();
+        const n = this.info.length;
+        return this.switchSheet((this.sheet + (e.key === "PageDown" ? 1 : n - 1)) % n);
+      }
+      if (e.shiftKey) {
+        // Excel's Ctrl+Shift number formats and borders, by character or by physical key
+        const byCode: Record<string, string> = { Digit1: "!", Digit2: "@", Digit3: "#", Digit4: "$", Digit5: "%", Digit6: "^", Digit7: "&", Minus: "_", Backquote: "~", Semicolon: ":" };
+        const ch = "!@#$%^&_~:".includes(e.key) ? e.key : byCode[e.code];
+        const fmt: Record<string, string> = { "!": "#,##0.00", "@": "h:mm AM/PM", "#": "d-mmm-yy", $: "$#,##0.00", "%": "0%", "^": "0.00E+00", "~": "General" };
+        if (ch && fmt[ch]) {
+          e.preventDefault();
+          return void this.execute("numfmt", fmt[ch]);
+        }
+        if (ch === "&" || ch === "_") {
+          e.preventDefault();
+          this.style({ border: ch === "&" ? 15 : 0 });
+          return;
+        }
+        if (ch === ":") {
+          e.preventDefault();
+          return this.insertStamp(String(timeSerial()), "h:mm");
+        }
+        if (k === "z") return run("redo");
+        return;
+      }
+      if (k === "z") return run("undo");
       if (k === "y") return run("redo");
-      if (k === "b") return run("bold");
-      if (k === "i") return run("italic");
-      if (k === "u") return run("underline");
+      if (k === "b" || e.code === "Digit2") return run("bold");
+      if (k === "i" || e.code === "Digit3") return run("italic");
+      if (k === "u" || e.code === "Digit4") return run("underline");
+      if (e.code === "Digit5") return run("strike");
       if (k === "a") return run("selectAll");
       if (k === "d") return run("fillDown");
       if (k === "r") return run("fillRight");
+      if (k === ";") {
+        e.preventDefault();
+        return this.insertStamp(String(dateSerial()), "yyyy-mm-dd");
+      }
+      if (k === "'" && this.active.r > 0) {
+        e.preventDefault();
+        return this.beginEdit(this.wb.input(this.sheet, this.active.r - 1, this.active.c));
+      }
       return;
     }
     if (e.key === "=" && e.altKey) {
@@ -1011,6 +1074,34 @@ export class SheetEditor implements EngineView {
       this.tabStart = null;
     } else this.tabStart = null;
     this.selectCell(Math.min(MAX_ROWS - 1, Math.max(0, e.r + dr)), Math.min(MAX_COLS - 1, Math.max(0, col)));
+    this.focus();
+  }
+
+  /** Ctrl+; / Ctrl+Shift+;: a static date or time in the active cell, formatted. */
+  private insertStamp(value: string, numFormat: string) {
+    if (!this.wb) return;
+    const { r, c } = this.active;
+    this.anchor = { r, c };
+    this.extent = { r, c };
+    const ch = this.applyEdits([{ sheet: this.sheet, r, c, text: value }]);
+    if (!ch?.error) this.execute("numfmt", numFormat);
+  }
+
+  /** Mod+Enter: commit the entry into every cell of the selection (references adjust like a fill). */
+  commitFill() {
+    const e = this.editing;
+    if (!e || !this.wb) return;
+    const s = this.selection;
+    const text = (e.source === "cell" ? this.cellEditor : this.formula).value;
+    this.hideAc();
+    const ch = this.applyEdits([{ sheet: this.sheet, r: e.r, c: e.c, text }]);
+    if (ch?.error) return;
+    this.endEdit();
+    if (s.r0 !== s.r1 || s.c0 !== s.c1) {
+      this.recordUndo(this.cellsOf(s));
+      this.changed(this.wb.fill(this.sheet, { r0: e.r, c0: e.c, r1: e.r, c1: e.c }, s));
+    }
+    this.selectionChanged();
     this.focus();
   }
 
@@ -1775,6 +1866,15 @@ export class SheetEditor implements EngineView {
     ctx.lineTo(this.hdrW - 0.5, H);
     ctx.stroke();
   }
+}
+
+/** Today as a spreadsheet serial (days since 1899-12-30), for Ctrl+;. */
+export function dateSerial(d = new Date()): number {
+  return Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(1899, 11, 30)) / 86_400_000);
+}
+/** The time now as a fraction of a day (to the minute), for Ctrl+Shift+;. */
+export function timeSerial(d = new Date()): number {
+  return (d.getHours() * 60 + d.getMinutes()) / 1440;
 }
 
 function fmt(n: number): string {

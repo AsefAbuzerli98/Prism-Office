@@ -256,6 +256,28 @@ export function applyMarks(blocks: Block[], from: Pos, to: Pos, patch: Partial<M
   return next;
 }
 
+/** Rewrite the text of a range in place (same length, marks kept), e.g. for change case. */
+export function mapText(blocks: Block[], from: Pos, to: Pos, fn: (s: string) => string): Block[] {
+  if (comparePos(from, to) > 0) [from, to] = [to, from];
+  const next = blocks.slice();
+  for (let bi = from.block; bi <= to.block; bi++) {
+    const b = blocks[bi]!;
+    if (!isParagraph(b)) continue;
+    const start = bi === from.block ? from.offset : 0;
+    const end = bi === to.block ? to.offset : blockLength(b);
+    if (start >= end) continue;
+    const [left, rest] = splitInlines(b.inlines, start);
+    const [mid, right] = splitInlines(rest, end - start);
+    const mapped = mid.map((i) => {
+      if (i.type !== "text") return i;
+      const t = fn(i.text);
+      return { ...i, text: t.length === i.text.length ? t : i.text };
+    });
+    next[bi] = withInlines(b, [...left, ...mapped, ...right]);
+  }
+  return next;
+}
+
 /** Whether every character in the range has `mark` set truthy (for toggles). */
 export function rangeHasMark(blocks: Block[], from: Pos, to: Pos, mark: keyof Marks): boolean {
   if (comparePos(from, to) > 0) [from, to] = [to, from];

@@ -174,6 +174,7 @@ export function renderHub(actions: HubActions, recents: RecentFile[], recoverabl
           [`${mod}K`, t("hub.kPalette")],
           [`${mod}T`, t("hub.kNewTab")],
           [`${mod},`, t("hub.kSettings")],
+          ["F1", t("hub.kAll")],
         ].flatMap(([k, v]) => [h("dt", {}, h("kbd", {}, k!)), h("dd", {}, v!)]),
       ),
     ),
