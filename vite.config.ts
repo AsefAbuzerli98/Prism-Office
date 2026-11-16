@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 // Tauri expects a fixed dev port and no screen clearing (keeps Rust errors visible).
 export default defineConfig({
   clearScreen: false,
-  server: { port: 1420, strictPort: true, watch: { ignored: ["**/src-tauri/**"] } },
+  server: { port: 1420, strictPort: true, watch: { ignored: ["**/src-tauri/**", "**/target/**", "**/crates/**", "**/fuzz/**", "**/.taste-skill/**"] } },
   envPrefix: ["VITE_", "TAURI_ENV_"],
   build: {
     target: "es2022",
