@@ -2,6 +2,7 @@ import { h } from "../core/dom";
 import { t } from "../core/i18n";
 import type { Mode } from "../core/modes";
 import { IMPLEMENTED_PHASE, RIBBONS } from "../core/ribbons";
+import { commandIcon } from "../core/icons";
 
 export function renderRibbon(
   mode: Mode,
@@ -55,7 +56,7 @@ export function renderRibbon(
                   dataset: { cmd: c.id },
                   onclick: (e: Event) => onCommand(c.id, e.currentTarget as HTMLElement),
                 },
-                h("span", { class: "cmd-icon" }, c.icon),
+                commandIcon(c.id, c.icon),
                 h("span", { class: "cmd-label" }, label),
               );
               },

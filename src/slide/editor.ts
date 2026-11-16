@@ -36,7 +36,8 @@ import { effectivePara, resolveShape, slideContext } from "./resolve";
 import { readEditable, renderEditable, setBlockProps, type EditEnv } from "./textedit";
 import { EMU_PER_PT, fitScale, type TextEnv } from "./text";
 
-const ACCENT = "#C2553A";
+/** Selection colour: the current mode's accent from the CSS tokens. */
+const accent = () => (typeof getComputedStyle !== "undefined" ? getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() : "") || "#b4235a";
 const HANDLE = 8;
 const ROT_OFFSET = 22;
 const PAD = 28;
@@ -505,7 +506,7 @@ export class SlideEditor implements EngineView {
       const scale = Math.min(v.k * dpr, 8192 / pt(m.width), 8192 / pt(m.height));
       const source = this.raster.get(this.current, this.version, scale, pt(m.width), pt(m.height), paintSlide);
       try {
-        this.backend.draw([{ key: `s${this.current}`, version: this.version * 1000 + Math.round(scale * 100), source, x: v.ox, y: v.oy, w: W, h: H }], [0.906, 0.898, 0.894]);
+        this.backend.draw([{ key: `s${this.current}`, version: this.version * 1000 + Math.round(scale * 100), source, x: v.ox, y: v.oy, w: W, h: H }], [0.957, 0.965, 0.973]);
         composited = true;
       } catch (err) {
         this.downgradeCompositor(err);
@@ -517,7 +518,7 @@ export class SlideEditor implements EngineView {
       octx.fillRect(v.ox + W, v.oy + 3, 2, H);
       octx.fillRect(v.ox + 2, v.oy + H, W, 3);
     } else {
-      octx.fillStyle = "#e7e5e4";
+      octx.fillStyle = "#f4f6f8";
       octx.fillRect(0, 0, vw, vh);
       octx.fillStyle = "rgba(0,0,0,.18)";
       octx.fillRect(v.ox + 2, v.oy + 3, W, H);
@@ -539,7 +540,7 @@ export class SlideEditor implements EngineView {
       const x = this.xfrmOf(n);
       if (!x) continue;
       const cs = this.corners(x);
-      ctx.strokeStyle = ACCENT;
+      ctx.strokeStyle = accent();
       ctx.setLineDash(this.editing?.id === n.id ? [4, 3] : []);
       ctx.beginPath();
       cs.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
@@ -555,7 +556,7 @@ export class SlideEditor implements EngineView {
         ctx.beginPath();
         ctx.moveTo(...(hs[1] as [number, number]));
         ctx.lineTo(...(hs[8] as [number, number]));
-        ctx.strokeStyle = ACCENT;
+        ctx.strokeStyle = accent();
         ctx.stroke();
         hs.forEach(([hx, hy], i) => {
           ctx.beginPath();
@@ -563,7 +564,7 @@ export class SlideEditor implements EngineView {
           else ctx.rect(hx - 4, hy - 4, 8, 8);
           ctx.fillStyle = "#fff";
           ctx.fill();
-          ctx.strokeStyle = ACCENT;
+          ctx.strokeStyle = accent();
           ctx.stroke();
         });
       }
@@ -592,8 +593,8 @@ export class SlideEditor implements EngineView {
       const w = (pt(Math.abs(d.x - d.sx)) * v.k) | 0;
       const hh = (pt(Math.abs(d.y - d.sy)) * v.k) | 0;
       ctx.setLineDash(d.kind === "marquee" ? [3, 3] : []);
-      ctx.strokeStyle = ACCENT;
-      ctx.fillStyle = "rgba(194,85,58,.08)";
+      ctx.strokeStyle = accent();
+      ctx.fillStyle = "rgba(180,35,90,.08)";
       ctx.fillRect(x0, y0, w, hh);
       ctx.strokeRect(x0 + 0.5, y0 + 0.5, w, hh);
     }

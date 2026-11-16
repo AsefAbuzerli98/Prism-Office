@@ -9,7 +9,8 @@ export interface ModeInfo {
   equivalent: string;
   tagline: string;
   /** Accent palette applied to the window chrome. */
-  accent: { base: string; strong: string; soft: string; contrast: string };
+  /** `frame`: the chrome's low-chroma tint of the mode hue (tab strip, ribbon, status). */
+  accent: { base: string; strong: string; soft: string; contrast: string; frame: string };
   extensions: readonly string[];
   defaultExtension: string;
   glyph: string;
@@ -21,7 +22,7 @@ export const MODES: Record<Mode, ModeInfo> = {
     label: "Document",
     equivalent: "Word",
     tagline: "Write, structure and cite with an AI drafting agent.",
-    accent: { base: "#2563eb", strong: "#1d4ed8", soft: "#dbeafe", contrast: "#ffffff" }, // cobalt
+    accent: { base: "#2f5fbf", strong: "#244b99", soft: "#e8eef9", contrast: "#ffffff", frame: "#f6f8fb" }, // cobalt
     extensions: ["docx", "docm", "dotx", "dotm"],
     defaultExtension: "docx",
     glyph: "W",
@@ -31,7 +32,7 @@ export const MODES: Record<Mode, ModeInfo> = {
     label: "Workbook",
     equivalent: "Excel",
     tagline: "Dynamic arrays, regex functions and in-cell Python.",
-    accent: { base: "#059669", strong: "#047857", soft: "#d1fae5", contrast: "#ffffff" }, // emerald
+    accent: { base: "#1e7b4f", strong: "#17633f", soft: "#e4f2ea", contrast: "#ffffff", frame: "#f6f9f7" }, // ledger green
     extensions: ["xlsx", "xlsm", "xltx", "xltm"],
     defaultExtension: "xlsx",
     glyph: "X",
@@ -41,7 +42,7 @@ export const MODES: Record<Mode, ModeInfo> = {
     label: "Presentation",
     equivalent: "PowerPoint",
     tagline: "Vector slides, Cameo video and a recording studio.",
-    accent: { base: "#c2553a", strong: "#a3432c", soft: "#fde4dc", contrast: "#ffffff" }, // terracotta
+    accent: { base: "#b4235a", strong: "#921c49", soft: "#f8e6ed", contrast: "#ffffff", frame: "#faf7f8" }, // raspberry
     extensions: ["pptx", "pptm", "potx", "potm", "ppsx", "ppsm"],
     defaultExtension: "pptx",
     glyph: "P",

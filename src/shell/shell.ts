@@ -34,6 +34,7 @@ import { isCollapsed } from "../word/ops";
 
 const isCollapsedSel = (ed: WordEditor) => isCollapsed(ed.selection);
 import { CommandPalette } from "./palette";
+import { prismMark } from "../core/icons";
 import { renderRibbon } from "./ribbon";
 import { openSettings } from "./settings";
 
@@ -796,7 +797,7 @@ export class Shell {
         );
       case "ppt.animate":
         return pick(
-          [...ANIMATION_PRESETS.map((a) => ({ value: `${a.class}:${a.preset}${a.subtype !== undefined ? `:${a.subtype}` : ""}`, label: `${a.class === "entr" ? "↗" : a.class === "exit" ? "↘" : "✦"} ${t(`slide.fx.${a.class}.${a.preset}`, {}, a.label)}` })), { value: "clear", label: t("slide.clearAnimations", {}, "Remove animations") }],
+          [...ANIMATION_PRESETS.map((a) => ({ value: `${a.class}:${a.preset}${a.subtype !== undefined ? `:${a.subtype}` : ""}`, label: `${t(`slide.fx.${a.class}.${a.preset}`, {}, a.label)} · ${a.class === "entr" ? t("slide.fxEntrance", {}, "entrance") : a.class === "exit" ? t("slide.fxExit", {}, "exit") : t("slide.fxEmphasis", {}, "emphasis")}` })), { value: "clear", label: t("slide.clearAnimations", {}, "Remove animations") }],
           (v) => (v === "clear" ? sl.execute("clearAnimations") : sl.execute("animate", v)),
           title,
         );
@@ -1049,7 +1050,7 @@ export class Shell {
       h(
         "button",
         { class: `hub-tab${active ? "" : " active"}`, "aria-label": t("shell.hub"), title: t("shell.hub"), onclick: () => this.goHub() },
-        "◆",
+        prismMark(18),
       ),
       ...items,
       h("button", { class: "new-tab", "aria-label": t("shell.newTab"), title: t("shell.newTab"), onclick: () => this.goHub() }, "+"),

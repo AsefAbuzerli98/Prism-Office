@@ -14,9 +14,9 @@ describe("modes", () => {
   });
 
   it("uses the specified accent families", () => {
-    expect(MODES.document.accent.base).toBe("#2563eb"); // cobalt
-    expect(MODES.workbook.accent.base).toBe("#059669"); // emerald
-    expect(MODES.presentation.accent.base).toBe("#c2553a"); // terracotta
+    expect(MODES.document.accent.base).toBe("#2f5fbf"); // cobalt
+    expect(MODES.workbook.accent.base).toBe("#1e7b4f"); // ledger green
+    expect(MODES.presentation.accent.base).toBe("#b4235a"); // raspberry
   });
 
   it("accent text meets WCAG AA for large UI text (≥3:1) against white", () => {
@@ -47,7 +47,7 @@ describe("modes", () => {
   it("applyTheme sets CSS variables and data-mode", () => {
     const el = document.createElement("div");
     applyTheme("workbook", el);
-    expect(el.style.getPropertyValue("--accent")).toBe("#059669");
+    expect(el.style.getPropertyValue("--accent")).toBe("#1e7b4f");
     expect(el.dataset.mode).toBe("workbook");
     applyTheme(null, el);
     expect(el.dataset.mode).toBe("hub");

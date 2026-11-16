@@ -1,7 +1,7 @@
 import { MODES, type Mode } from "./modes";
 
 /** Neutral chrome used by the Hub before any modality is chosen. */
-const HUB_ACCENT = { base: "#4f46e5", strong: "#4338ca", soft: "#e0e7ff", contrast: "#ffffff" };
+const HUB_ACCENT = { base: "#131416", strong: "#000000", soft: "#ebedee", contrast: "#ffffff", frame: "#f9fbfc" };
 
 /** Apply a modality's accent tokens as CSS custom properties. */
 export function applyTheme(mode: Mode | null, root: HTMLElement = document.documentElement) {
@@ -10,6 +10,7 @@ export function applyTheme(mode: Mode | null, root: HTMLElement = document.docum
   root.style.setProperty("--accent-strong", accent.strong);
   root.style.setProperty("--accent-soft", accent.soft);
   root.style.setProperty("--accent-contrast", accent.contrast);
+  root.style.setProperty("--mode-frame", accent.frame);
   root.dataset.mode = mode ?? "hub";
 }
 
