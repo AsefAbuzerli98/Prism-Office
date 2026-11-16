@@ -3139,6 +3139,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "prism-io"
+version = "0.1.0"
+dependencies = [
+ "prism-openxml",
+ "prism-sheet",
+ "prism-slide",
+ "prism-word",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "prism-office"
 version = "0.1.0"
 dependencies = [

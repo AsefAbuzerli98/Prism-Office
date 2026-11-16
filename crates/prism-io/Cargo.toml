@@ -1,0 +1,23 @@
+[package]
+name = "prism-io"
+description = "Open/save of DOCX, XLSX and PPTX in the webview (browser preview) — the host's readers/writers compiled to WASM"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = []
+wasm = ["dep:wasm-bindgen"]
+
+[dependencies]
+prism-openxml.workspace = true
+prism-word.workspace = true
+prism-sheet = { workspace = true, features = ["xlsx"] }
+prism-slide.workspace = true
+serde_json.workspace = true
+wasm-bindgen = { version = "=0.2.130", optional = true }

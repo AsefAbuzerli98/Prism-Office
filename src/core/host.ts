@@ -1,6 +1,7 @@
 import { blankDocument, type WordDocument } from "../word/model";
 import { blankWorkbook, type WorkbookModel } from "../sheet/model";
 import { blankPresentation, type PresentationModel } from "../slide/model";
+import { download, loadIo, pickOfficeFile, type IoDocument } from "./browser-io";
 import type { Mode } from "./modes";
 import { MODES, modeFromPath } from "./modes";
 
@@ -458,6 +459,8 @@ export class TauriHost implements HostBridge {
  * Tauri) and in unit tests. Behaviour mirrors the Rust host; recents and
  * settings persist to `localStorage`.
  */
+const promptAsk = (m: string, v: string) => window.prompt(m, v);
+
 export class BrowserHost implements HostBridge {
   readonly native: boolean = false;
   readonly multiWindow: boolean = false;
@@ -469,8 +472,25 @@ export class BrowserHost implements HostBridge {
   constructor(
     private readonly storage: Storage = localStorage,
     /** Path prompt used in place of native dialogs. */
-    private readonly ask: (message: string, value: string) => string | null = (m, v) => window.prompt(m, v),
+    private readonly ask: (message: string, value: string) => string | null = promptAsk,
+    /** Real preview: file picker + WASM readers/writers + downloads (off in tests). */
+    private readonly realFiles = false,
   ) {}
+
+  /** Files chosen in the picker, by name, until opened. */
+  private picked = new Map<string, Uint8Array>();
+  /** Open documents backed by a real package (opened files, or created on first save). */
+  private io = new Map<number, IoDocument>();
+
+  /** Load a file's model into the preview's stores. */
+  private adoptIo(id: number, doc: IoDocument) {
+    this.io.set(id, doc);
+    const model = JSON.parse(doc.model());
+    const kind = doc.kind();
+    if (kind === "document") this.words.set(id, model);
+    else if (kind === "workbook") this.sheetModels.set(id, model);
+    else this.presentations.set(id, model);
+  }
 
   windowContext() {
     return injectedContext();
@@ -489,7 +509,18 @@ export class BrowserHost implements HostBridge {
   async openDocument(path: string): Promise<DocumentInfo> {
     const kind = modeFromPath(path);
     if (!kind) throw new Error(`unsupported file type: ${path}`);
+    const bytes = this.picked.get(path);
+    if (this.realFiles && !bytes) {
+      throw new Error("The browser preview cannot read files by path — use File → Open to choose the file, or run the desktop app (pnpm tauri dev)");
+    }
+    let doc: IoDocument | null = null;
+    if (bytes) {
+      const { IoDocument } = await loadIo();
+      doc = new IoDocument(bytes);
+      this.picked.delete(path);
+    }
     const info = this.store({ kind, title: path.split(/[\\/]/).pop()!, path });
+    if (doc) this.adoptIo(info.id, doc);
     this.touchRecent(path, kind);
     return info;
   }
@@ -510,6 +541,21 @@ export class BrowserHost implements HostBridge {
     }
     doc.path = target;
     doc.title = target.split(/[\\/]/).pop()!;
+    if (this.realFiles) {
+      // write the real file with the WASM writers and download it
+      let io = this.io.get(id);
+      if (!io) {
+        const { IoDocument } = await loadIo();
+        io = IoDocument.blank(doc.kind);
+        this.io.set(id, io);
+      }
+      const model = doc.kind === "document" ? this.words.get(id) : doc.kind === "workbook" ? this.sheetModels.get(id) : this.presentations.get(id);
+      if (model) io.setModel(JSON.stringify(model));
+      const now = (Date.now() - new Date().getTimezoneOffset() * 60_000) / 86_400_000 + 25569;
+      const bytes = io.save(now);
+      this.adoptIo(id, io);
+      download(doc.title, bytes);
+    }
     this.touchRecent(target, doc.kind);
     this.emit({ type: "documentSaved", info: { ...doc } });
     return { ...doc };
@@ -517,6 +563,8 @@ export class BrowserHost implements HostBridge {
 
   async closeDocument(id: number): Promise<void> {
     if (!this.docs.delete(id)) throw new Error(`no open document with id ${id}`);
+    this.io.get(id)?.free();
+    this.io.delete(id);
     this.emit({ type: "documentClosed", id });
   }
 
@@ -599,9 +647,14 @@ export class BrowserHost implements HostBridge {
 
   private slideParts = new Map<string, { mime: string; data: string }>();
   async getSlidePart(id: number, part: string) {
+    const io = this.io.get(id);
+    const p = io?.image(part);
+    if (p) return { mime: p.mime, data: bytesToBase64(p.bytes) };
     return this.slideParts.get(`${id}:${part}`) ?? null;
   }
   async addSlideImage(id: number, data: string) {
+    const io = this.io.get(id);
+    if (io) return JSON.parse(io.addImage(base64ToBytes(data))) as string;
     const { mime } = imageInfo(data);
     const ext = mime.split("/")[1]?.replace("svg+xml", "svg") ?? "png";
     const part = `/ppt/media/image${this.slideParts.size + 1}.${ext}`;
@@ -611,9 +664,13 @@ export class BrowserHost implements HostBridge {
 
   private images = new Map<string, { mime: string; data: string }>();
   async getWordImage(id: number, relId: string) {
+    const p = this.io.get(id)?.image(relId);
+    if (p) return { mime: p.mime, data: bytesToBase64(p.bytes) };
     return this.images.get(`${id}:${relId}`) ?? null;
   }
   async addWordImage(id: number, data: string) {
+    const io = this.io.get(id);
+    if (io) return JSON.parse(io.addImage(base64ToBytes(data))) as { relId: string; cx: number; cy: number };
     const info = imageInfo(data);
     const relId = `rIdImg${this.images.size + 1}`;
     this.images.set(`${id}:${relId}`, { mime: info.mime, data });
@@ -669,11 +726,18 @@ export class BrowserHost implements HostBridge {
   }
 
   async pickOpenPath() {
-    return this.ask("Open file (full path):", "")?.trim() || null;
+    if (!this.realFiles) return this.ask("Open file (full path):", "")?.trim() || null;
+    const f = await pickOfficeFile();
+    if (!f) return null;
+    this.picked.set(f.name, f.bytes);
+    return f.name;
   }
 
   async pickSavePath(_kind: Mode, suggested: string) {
-    return this.ask("Save as (full path):", suggested)?.trim() || null;
+    if (!this.realFiles) return this.ask("Save as (full path):", suggested)?.trim() || null;
+    // the browser decides where downloads go; only the file name matters
+    const name = suggested.split(/[\\/]/).pop() ?? suggested;
+    return this.ask("Save as (file name):", name)?.trim() || null;
   }
 
   logEvent() {}
@@ -835,6 +899,16 @@ export function pickImageFile(): Promise<string | null> {
   });
 }
 
+function bytesToBase64(b: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+function base64ToBytes(s: string): Uint8Array {
+  return Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+}
+
 /** Pick the Tauri bridge when running inside the native shell. */
 export async function detectHost(): Promise<HostBridge> {
   const w = globalThis as { __TAURI_INTERNALS__?: unknown };
@@ -853,5 +927,5 @@ export async function detectHost(): Promise<HostBridge> {
       closeWindow: () => getCurrentWindow().close(),
     });
   }
-  return new BrowserHost();
+  return new BrowserHost(localStorage, undefined, true);
 }
